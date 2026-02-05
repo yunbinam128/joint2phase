@@ -76,7 +76,7 @@ smle_probit <- function(formula, data, B_basis, x_name, se_calc = TRUE, max_iter
     if (max(abs(theta_curr - theta_old)) < tol) break
   }
 
-  # -- 5. Conditional Standard Error Estimation (se_calc = TRUE) ----
+  # -- 5. Standard Error Estimation via profile log-likelihood (se_calc = TRUE) ----
   se <- NULL
   vcov <- NULL
   if (se_calc) {
