@@ -21,7 +21,7 @@ smle_probit(
 
 \item{B_basis}{Basis matrix for the spline basis.}
 
-\item{x_name}{Character name of the expensive covariate (missingness).}
+\item{x_name}{Name of the expensive covariate X.}
 
 \item{se_calc}{Logical; whether to compute standard errors.}
 

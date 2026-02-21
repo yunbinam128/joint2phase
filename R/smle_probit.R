@@ -3,7 +3,7 @@
 #' @param formula A model formula for the probit specification.
 #' @param data A data frame containing the variables in the formula.
 #' @param B_basis Basis matrix for the spline basis.
-#' @param x_name Character name of the expensive covariate (missingness).
+#' @param x_name Name of the expensive covariate X.
 #' @param se_calc Logical; whether to compute standard errors.
 #' @param max_iter Maximum number of optimization iterations.
 #' @param tol Convergence tolerance for the optimizer.

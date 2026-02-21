@@ -8,7 +8,7 @@ compute_prob_matrix <- function(theta, y0, X0, x_support, x_name) {
   x_col_idx <- which(colnames(X0) == x_name)
   beta_no_x <- beta[-x_col_idx]
   X0_no_x   <- X0[, -x_col_idx, drop = FALSE]
-  # Constant part of mu for each subject: mu_fixed = Z * gamma
+  # Constant part of mu for each subject: mu_fixed = Z * beta_z
   mu_fixed <- as.vector(X0_no_x %*% beta_no_x)
 
   # Vectorized calculation of mu for all support points v
