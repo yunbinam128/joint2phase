@@ -16,7 +16,8 @@
 #' @importFrom stats lm coef var residuals dnorm pnorm model.frame model.response model.matrix
 #' @importFrom numDeriv hessian jacobian
 #' @export
-em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = NULL, se_calc = TRUE, max_iter = 100, tol = 1e-6) {
+em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = NULL,
+                           se_calc = TRUE, max_iter = 100, tol = 1e-6) {
   # -- 0. Validate ----
   if (se_calc && is.null(vcov_cond)) {
     stop("vcov_cond must be provided when se_calc is TRUE to account for Model 1 uncertainty.")
