@@ -6,7 +6,8 @@
 #' @param data A data frame containing the variables in the model.
 #' @param formula_cond The \code{formula} used for the ordinal outcome model (\eqn{Y_1}).
 #' @param theta_cond Vector of estimated parameters from the ordinal model (\eqn{\theta_1}).
-#' @param vcov_cond Covariance matrix of \eqn{\theta_1}, used for standard error adjustment.
+#' @param vcov_cond Covariance matrix of \eqn{\theta_1}. Optional; only required if \code{se_calc = TRUE}.
+#' @param se_calc Logical; whether to compute standard errors for Model 2 parameters. Defaults to TRUE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 100.
 #' @param tol Convergence tolerance.
 #'
@@ -15,8 +16,12 @@
 #' @importFrom stats lm coef var residuals dnorm pnorm model.frame model.response model.matrix
 #' @importFrom numDeriv hessian jacobian
 #' @export
-em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond, max_iter = 100, tol = 1e-6) {
+em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = NULL, se_calc = TRUE, max_iter = 100, tol = 1e-6) {
   # -- 0. Validate ----
+  if (se_calc && is.null(vcov_cond)) {
+    stop("vcov_cond must be provided when se_calc is TRUE to account for Model 1 uncertainty.")
+  }
+
   cols2check <- unique(c(all.vars(formula), all.vars(formula_cond)))
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
   if (any(na_counts > 0)) {
@@ -102,29 +107,38 @@ em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond, m
 
   # -- 4. Standard Error Estimation ----
   # Calculate Hessian numerically (numDeriv::hessian)
-  theta2_hat <- c(gamma_curr, sigma12_curr, sigma22_curr)
-  hess <- numDeriv::hessian(
-    func = function(t) {
-      obs_loglik(theta = t, p_covs_m2, y2_vec, y1_vec, X_mat_m2, mu1, alpha_ext)
-    }, x = theta2_hat)
-  # Estimate the conditional variability
-  V22_inv <- try(solve(-hess), silent = TRUE)
-  # Calculate the Jacobian of the score function w.r.t theta1
-  V21 <- numDeriv::jacobian(
-    func = function(t1) {
-      # Update mu1 and alpha_ext inside this wrapper
-      beta_tmp <- t1[1:p_covs_m1]
-      alpha_tmp <- t1[(p_covs_m1 + 1):length(t1)]
-      alpha_ext_tmp <- c(-Inf, alpha_tmp, Inf)
-      mu1_tmp <- as.vector(X_mat_m1 %*% beta_tmp)
-      # score_theta2 using the varying theta1 values
-      score_theta2_function(theta2_hat, p_covs_m2, y2_vec, y1_vec, X_mat_m2, mu1_tmp, alpha_ext_tmp)
-    },
-    x = theta_cond)
+  se <- NULL
+  vcov_mat <- NULL
 
-  # Law of total variance
-  vcov_mat <- V22_inv + (V22_inv %*% V21 %*% vcov_cond %*% t(V21) %*% V22_inv)
-  se <- sqrt(diag(vcov_mat))
+  if (se_calc) {
+    # Calculate Hessian numerically for conditional variability
+    theta2_hat <- c(gamma_curr, sigma12_curr, sigma22_curr)
+    hess <- numDeriv::hessian(
+      func = function(t) {
+        obs_loglik(theta = t, p_covs_m2, y2_vec, y1_vec, X_mat_m2, mu1, alpha_ext)
+      }, x = theta2_hat)
+    # Estimate the conditional variability
+    V22_inv <- try(solve(-hess), silent = TRUE)
+
+    if (inherits(V22_inv, "try-error")) {
+      warning("Hessian inversion failed; standard errors cannot be computed.")
+    } else {
+      # Calculate the Jacobian of the score function w.r.t theta1
+      V21 <- numDeriv::jacobian(
+        func = function(t1) {
+          beta_tmp <- t1[1:p_covs_m1]
+          alpha_tmp <- t1[(p_covs_m1 + 1):length(t1)]
+          alpha_ext_tmp <- c(-Inf, alpha_tmp, Inf)
+          mu1_tmp <- as.vector(X_mat_m1 %*% beta_tmp)
+          score_theta2_function(theta2_hat, p_covs_m2, y2_vec, y1_vec, X_mat_m2, mu1_tmp, alpha_ext_tmp)
+        },
+        x = theta_cond)
+
+      # Law of total variance
+      vcov_mat <- V22_inv + (V22_inv %*% V21 %*% vcov_cond %*% t(V21) %*% V22_inv)
+      se <- sqrt(diag(vcov_mat))
+    }
+  }
 
   return(list(
     gamma = gamma_curr,
