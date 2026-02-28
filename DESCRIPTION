@@ -1,11 +1,15 @@
 Package: joint2phase
-Title: What the Package Does (One Line, Title Case)
+Title: Joint Modeling of Ordinal and Continuous Outcomes in Two-Phase Designs
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Yunbi", "Nam", , "yunbinam@gmail.com", role = c("aut", "cre"))
+Description: Provides functions for fitting joint models to ordinal and 
+  continuous outcomes specifically designed for two-phase outcome-dependent sampling (ODS). 
+  The package implements two-step and simultaneous estimation procedures, including
+  Sieve Maximum Likelihood Estimation (SMLE) for ordinal probit models and
+  EM algorithms for conditional and joint modeling. These methods account for 
+  biased sampling and latent error correlations to provide valid inference for marginal effects.
+License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
