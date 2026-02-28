@@ -95,12 +95,12 @@ em_joint <- function(formula1, formula2, data, B_basis, x_name, max_iter = 500, 
     # Update {p_vl}
     p_vl_curr <- update_p_vl_cpp(prob_y1_given_xz, B0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
-    # Update theta1
-    theta1_curr <- update_theta1_joint(theta1_curr, w_iv, y1_s0, y1_s1, Ey1_star_s0, Ey1_star_s1, Xmat_m1_s0, Xmat_m1_s1, x_support, x_name)
-
     # Update theta2
     theta2_curr <- update_theta2_joint(theta1_curr, theta2_curr, y1_s1, y2_vec, Xmat_m1_s1, Xmat_m2, Ey1_star_s1, Vary1_star_s1)
     gamma_curr <- theta2_curr[1:p_covs2]
+
+    # Update theta1
+    theta1_curr <- update_theta1_joint(theta1_curr, w_iv, y1_s0, y1_s1, Ey1_star_s0, Ey1_star_s1, Xmat_m1_s0, Xmat_m1_s1, x_support, x_name)
 
     if (max(abs(c(theta1_curr, gamma_curr) - theta_old)) < tol) break
   }

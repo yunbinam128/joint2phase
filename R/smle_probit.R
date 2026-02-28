@@ -57,8 +57,6 @@ smle_probit <- function(formula, data, B_basis, x_name, se_calc = TRUE, max_iter
     ## -- E-STEP: Compute expectations for S=0 ----
     # Calculate P(Y_i | x_v, Z_i; theta) for all i in S=0 and all v in support
     prob_y0_v <- compute_prob_matrix(theta_curr, y0, X0, x_support, x_name)  # (n0, d_size)
-    # Profile out p_vl
-    p_vl_curr <- update_p_vl_cpp(prob_y0_v, B0, p_vl_curr, p_vl_num_init, max_iter, tol)
     # Calculate weights
     # Marginal P(X=v | Z) = sum_l { B_l(Z) * p_vl }
     prob_x_v_given_z0 <- B0 %*% t(p_vl_curr)
@@ -68,9 +66,11 @@ smle_probit <- function(formula, data, B_basis, x_name, se_calc = TRUE, max_iter
     q_iv        <- joint_y_x_v / denom_y0
 
     # -- M-STEP: Update parameters ----
-    # 1. Update theta (theta = argmax weighted log-likelihood)
+    # Update theta (theta = argmax weighted log-likelihood)
     # weights=1 for S=1 and weights=q_iv for S=0 (each subject i is repeated d times for S=0)
     theta_curr <- update_theta_weighted(theta_curr, q_iv, y1, X1, y0, X0, x_support, x_name)
+    # Update p_vl
+    p_vl_curr <- update_p_vl_cpp(prob_y0_v, B0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
     # Check Convergence
     if (max(abs(theta_curr - theta_old)) < tol) break
