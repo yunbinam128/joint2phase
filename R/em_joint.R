@@ -5,12 +5,13 @@
 #' @param data Full dataset containing Phase 1 and Phase 2.
 #' @param B_basis Basis matrix for B-splines of Z1.
 #' @param x_name Name of the expensive covariate X.
+#' @param se_calc Logical; if TRUE, computes SEs via profile likelihood.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
-em_joint <- function(formula1, formula2, data, B_basis, x_name, max_iter = 500, tol = 1e-6) {
+em_joint <- function(formula1, formula2, data, B_basis, x_name, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
 
   # -- 0. Validate ----
   if (any(is.na(B_basis))) {
@@ -104,8 +105,24 @@ em_joint <- function(formula1, formula2, data, B_basis, x_name, max_iter = 500, 
 
     if (max(abs(c(theta1_curr, gamma_curr) - theta_old)) < tol) break
   }
-  sigma12_curr <- theta2_curr[p_covs2 + 1]
-  sigma22_curr <- theta2_curr[p_covs2 + 2]
 
-  return(list(theta1 = theta1_curr, gamma = gamma_curr, sigma12 = sigma12_curr, sigma22 = sigma22_curr, iterations = iter))
+  # -- 4. Standard Error Estimation ----
+  se_theta1 <- NULL
+  se_theta2 <- NULL
+  vcov_mat <- NULL
+  if (se_calc) {
+    se_res <- estimate_em_joint_se(theta1_curr, theta2_curr, p_vl_curr, p_vl_num_init,
+                                   y1_s0, y1_s1, y2_vec, Xmat_m1_s0, Xmat_m1_s1, Xmat_m2,
+                                   B0, x_support, x_name)
+    p_covs1 <- length(theta1_curr)
+    se_theta1 <- se_res$se[1:p_covs1]
+    se_theta2 <- se_res$se[(p_covs1 + 1):length(se_res$se)]
+    vcov_mat <- se_res$vcov
+  }
+
+  return(list(theta1 = theta1_curr, se_theta1 = se_theta1,
+              gamma = theta2_curr[1:p_covs2],
+              sigma12 = theta2_curr[p_covs2 + 1],
+              sigma22 = theta2_curr[p_covs2 + 2],
+              se_theta2 = se_theta2, iterations = iter))
 }
