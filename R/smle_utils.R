@@ -18,8 +18,7 @@ compute_prob_matrix <- function(theta, y0, X0, x_support, x_name) {
 
   # Calculate Ordered Probit probabilities for all i, v simultaneously
   alpha_ext <- c(-Inf, alpha, Inf)
-  probs <- pnorm(alpha_ext[y0 + 1] - mu_mat) - pnorm(alpha_ext[y0] - mu_mat)
-  probs[probs < 1e-12] <- 1e-12  # Prevent exactly zero probabilities
+  probs <- pmax(1e-16, stats::pnorm(alpha_ext[y0 + 1] - mu_mat) - stats::pnorm(alpha_ext[y0] - mu_mat))
 
   return(probs)
 }
@@ -112,26 +111,25 @@ update_theta_weighted <- function(start_theta, q_iv, y1, X1, y0, X0, x_support, 
 
 # -- Calculate log-likelihood at fixed theta, p_vl ----
 calculate_full_loglik <- function(theta, p_vl, y1, X1, y0, X0, B0, x_support, x_name) {
-  # --- Phase 2 (S=1): Full Data ---
+  # Subjects selected in Phase 2 (S=1)
   p_covs <- ncol(X1)
   beta   <- theta[1:p_covs]
   alpha  <- theta[(p_covs + 1):length(theta)]
 
   mu1 <- as.vector(X1 %*% beta)
   alpha_ext <- c(-Inf, alpha, Inf)
-  prob1 <- pnorm(alpha_ext[y1 + 1] - mu1) - pnorm(alpha_ext[y1] - mu1)
+  prob1 <- pmax(1e-16, stats::pnorm(alpha_ext[y1 + 1] - mu1) - stats::pnorm(alpha_ext[y1] - mu1))
 
-  # --- Phase 1 (S=0): Marginal Data ---
+  # Subjects NOT selected in Phase 2 (S=0)
   # We need P(Y|Z) = sum_v sum_l P(Y|x_v, Z) * B_l(Z) * p_vl
-  # Use your existing compute_prob_matrix for P(Y|x_v, Z)
-  prob_y0_v <- compute_prob_matrix(theta, y0, X0, x_support, x_name)
+  prob_y0_v <- compute_prob_matrix(theta, y0, X0, x_support, x_name)  # P(Y|x_v, Z)
   # marginal_prob_i = sum_l [ B_l(Z_i) * sum_v (P(Y_i|x_v, Z_i) * p_vl) ]
   # Inner sum over v: [n0 x s_n]
   inner_sum <- prob_y0_v %*% p_vl
   # Outer sum over l: multiply by B-spline basis values
-  prob0 <- rowSums(inner_sum * B0)
+  prob0 <- pmax(1e-16, rowSums(inner_sum * B0))
 
-  return(sum(log(prob1 + 1e-16)) + sum(log(prob0 + 1e-16)))
+  return(sum(log(prob1)) + sum(log(prob0)))
 }
 
 # -- Profile log-likelihood ----
@@ -141,9 +139,9 @@ pl_theta <- function(theta, p_vl_init, p_vl_R1, y1, X1, y0, X0, B0, x_support,
   prob_y0_v <- compute_prob_matrix(theta, y0, X0, x_support, x_name)
 
   # EM Loop: Update only p_vl
-  p_vl_curr <- update_p_vl_cpp(prob_y0_v, B0, p_vl_init, p_vl_R1, max_iter, tol)
+  p_vl_opt <- update_p_vl_cpp(prob_y0_v, B0, p_vl_init, p_vl_R1, max_iter, tol)
 
-  return(calculate_full_loglik(theta, p_vl_curr, y1, X1, y0, X0, B0, x_support, x_name))
+  return(calculate_full_loglik(theta, p_vl_opt, y1, X1, y0, X0, B0, x_support, x_name))
 }
 
 # -- Estimate SE via profile likelihood ----
@@ -163,7 +161,6 @@ estimate_smle_se <- function(theta_hat, p_vl_hat, p_vl_R1,
   if (inherits(vcov_mat, "try-error")) {
     return(list(se = rep(NA, length(theta_hat)), vcov = NULL))
   }
-  se <- sqrt(diag(vcov_mat))
 
-  return(list(se = se, vcov = vcov_mat))
+  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat))
 }
