@@ -18,7 +18,8 @@ compute_prob_matrix <- function(theta, y0, X0, x_support, x_name) {
 
   # Calculate Ordered Probit probabilities for all i, v simultaneously
   alpha_ext <- c(-Inf, alpha, Inf)
-  probs <- pmax(1e-16, stats::pnorm(alpha_ext[y0 + 1] - mu_mat) - stats::pnorm(alpha_ext[y0] - mu_mat))
+  probs <- stats::pnorm(alpha_ext[y0 + 1] - mu_mat) - stats::pnorm(alpha_ext[y0] - mu_mat)
+  probs[probs < 1e-16] <- 1e-16  # Prevent exactly zero probabilities
 
   return(probs)
 }

@@ -61,7 +61,7 @@ smle_probit <- function(formula, data, Bbasis, x_name, theta_init = NULL, se_cal
   }
   # Initialize p_vl
   p_vl_num_init <- t(outer(data[[x_name]][s_indicator == 1], x_support, "==")) %*% B1  # (d_size, s_n): numerator for initial p_vl
-  p_vl_curr <- sweep(p_vl_num_init, 2, colSums(p_vl_num_init) + 1e-12, FUN = "/")      # Column-wise normalization
+  p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")      # Column-wise normalization
 
   # -- 4. EM Algorithm Loop ----
   for (iter in 1:max_iter) {
@@ -75,7 +75,7 @@ smle_probit <- function(formula, data, Bbasis, x_name, theta_init = NULL, se_cal
     prob_x_v_given_z0 <- B0 %*% t(p_vl_curr)
     # Compute q_iv weights: P(X=v | Y, Z; theta, p_vl)
     joint_y_x_v <- prob_y0_v * prob_x_v_given_z0
-    denom_y0    <- rowSums(joint_y_x_v) + 1e-12
+    denom_y0    <- pmax(1e-16, rowSums(joint_y_x_v))
     q_iv        <- joint_y_x_v / denom_y0
 
     # -- M-STEP: Update parameters ----
