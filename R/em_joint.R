@@ -3,19 +3,22 @@
 #' @param formula1 Formula for the ordinal outcome Y1 (probit).
 #' @param formula2 Formula for the continuous outcome Y2 (Model 2).
 #' @param data Full dataset containing Phase 1 and Phase 2.
-#' @param B_basis Basis matrix for B-splines of Z1.
+#' @param Bbasis Basis matrix for B-splines of Z1.
 #' @param x_name Name of the expensive covariate X.
+#' @param theta1_init Optional numeric vector of initial values for theta1.
+#' @param theta2_init Optional numeric vector of initial values for theta2.
 #' @param se_calc Logical; if TRUE, computes SEs via profile likelihood.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
-em_joint <- function(formula1, formula2, data, B_basis, x_name, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
+em_joint <- function(formula1, formula2, data, Bbasis, x_name,
+                     theta1_init = NULL, theta2_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
 
   # -- 0. Validate ----
-  if (any(is.na(B_basis))) {
-    stop("The 'B_basis' matrix contains missing values. B-spline basis must be fully computed.")
+  if (any(is.na(Bbasis))) {
+    stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
   }
   cols2check <- setdiff(all.vars(formula1), x_name)
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
@@ -25,8 +28,8 @@ em_joint <- function(formula1, formula2, data, B_basis, x_name, se_calc = TRUE, 
                paste(missing_cols, collapse = ", "),
                "- Only the column specified in 'x_name' can have missingness."))
   }
-  if (nrow(B_basis) != nrow(data)) {
-    stop("B_basis must have the same number of rows as data.")
+  if (nrow(Bbasis) != nrow(data)) {
+    stop("Bbasis must have the same number of rows as data.")
   }
 
   # Identify selection indicator (assuming S=1 if x_name is NOT NA, and S=0 if x_name is NA)
@@ -41,11 +44,11 @@ em_joint <- function(formula1, formula2, data, B_basis, x_name, se_calc = TRUE, 
   # -- 1. Construct Data Matrices ----
   # Model 1 (formula1)
   mf1 <- model.frame(formula1, data, na.action = na.pass)
-  y1_vec <- as.numeric(model.response(mf1))
+  y1vec <- as.numeric(model.response(mf1))
   Xmat_m1 <- model.matrix(formula1, mf1)[, -1, drop = FALSE]  # remove the intercept (column 1)
-  y1_s1 <- y1_vec[n1_idx]; y1_s0 <- y1_vec[n0_idx]
+  y1_s1 <- y1vec[n1_idx]; y1_s0 <- y1vec[n0_idx]
   Xmat_m1_s1 <- Xmat_m1[n1_idx, , drop = FALSE]; Xmat_m1_s0 <- Xmat_m1[n0_idx, , drop = FALSE]
-  B1 <- B_basis[n1_idx, , drop = FALSE]; B0 <- B_basis[n0_idx, , drop = FALSE]
+  B1 <- Bbasis[n1_idx, , drop = FALSE]; B0 <- Bbasis[n0_idx, , drop = FALSE]
   sn_size <- ncol(B0)
 
   # Model 2 (formula2)
@@ -55,20 +58,47 @@ em_joint <- function(formula1, formula2, data, B_basis, x_name, se_calc = TRUE, 
   p_covs2 <- ncol(Xmat_m2)
 
   # -- 2. Initialize Parameters ----
-  # Initial probit guess for theta1
   # theta1: (beta, alpha/cutpoints)
-  fit_init <- MASS::polr(formula1, data_p2, method = "probit")
-  theta1_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
+  use_defaults <- TRUE
+  if (!is.null(theta1_init)) {
+    theta1_len <- ncol(Xmat_m1) + (length(unique(y1vec)) - 1)
+    if (length(theta1_init) == theta1_len) {
+      use_defaults <- FALSE
+      theta_curr <- theta1_init
+    } else {
+      warning(paste("theta1_init must have length", theta1_len))
+    }
+  }
+  if (use_defaults) {
+    # Initial probit guess for theta1
+    fit_init <- MASS::polr(formula1, data_p2, method = "probit")
+    theta1_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
+  }
+
   # theta2: (gamma, sigma12, sigma22)
-  # Initial OLS guess for gamma
-  fit_init <- stats::lm(formula2, data_p2)
-  gamma_curr <- as.vector(stats::coef(fit_init))
-  sigma22_curr <- stats::var(stats::residuals(fit_init))
-  sigma12_curr <- 0.1  # Initial correlation guess
-  theta2_curr <- c(gamma_curr, sigma12_curr, sigma22_curr)
+  if (!is.null(theta2_init)) {
+    theta2_len <- p_covs2 + 2
+    if (length(theta2_init) == theta2_len) {
+      use_defaults <- FALSE
+      theta2_curr <- theta2_init
+      gamma_curr <- theta2_curr[1:p_covs2]
+      sigma12_curr <- theta2_curr[p_covs2 + 1]
+      sigma22_curr <- theta2_curr[p_covs2 + 2]
+    } else {
+      warning(paste("theta2_init must have length", theta2_len))
+    }
+  }
+  if (use_defaults) {
+    # Initial OLS guess for theta2
+    fit_init <- stats::lm(formula2, data_p2)
+    gamma_curr <- as.vector(stats::coef(fit_init))
+    sigma22_curr <- stats::var(stats::residuals(fit_init))
+    sigma12_curr <- 0.1  # Initial correlation guess
+    theta2_curr <- c(gamma_curr, sigma12_curr, sigma22_curr)
+  }
   # p_vl: normalized sieve coefficients
   p_vl_num_init <- t(outer(data[[x_name]][n1_idx], x_support, "==")) %*% B1  # (d, s_n): numerator for initial p_vl
-  p_vl_curr <- sweep(p_vl_num_init, 2, colSums(p_vl_num_init) + 1e-12, FUN = "/")  # Column-wise normalization
+  p_vl_curr <- sweep(p_vl_num_init, 2, pmax(colSums(p_vl_num_init), 1e-16), FUN = "/")  # Column-wise normalization
 
   # -- 3. EM Loop ----
   for (iter in 1:max_iter) {
@@ -82,7 +112,7 @@ em_joint <- function(formula1, formula2, data, B_basis, x_name, se_calc = TRUE, 
     ### P(X = x_v | Z) = sum_l { p_vl * B_l(Z) }
     prob_x_given_z <- B0 %*% t(p_vl_curr)  # (n0, d)
     w_iv_num <- prob_y1_given_xz * prob_x_given_z  # (n0, d)
-    w_denom <- rowSums(w_iv_num) + 1e-12  # (n0)
+    w_denom <- pmax(1e-16, rowSums(w_iv_num))  # (n0)
     w_iv <- w_iv_num / w_denom  # (n0, d)
     ## Compute conditional expectation of Y1* | Y1, X, Z
     Ey1_star_s0 <- compute_ey1_star_s0(theta1_curr, y1_s0, Xmat_m1_s0, x_support, x_name)  # (n0, d)

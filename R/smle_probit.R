@@ -2,18 +2,19 @@
 #'
 #' @param formula A model formula for the probit specification.
 #' @param data A data frame containing the variables in the formula.
-#' @param B_basis Basis matrix for the spline basis.
+#' @param Bbasis Basis matrix for the spline basis.
 #' @param x_name Name of the expensive covariate X.
+#' @param theta_init Optional numeric vector of initial values for theta.
 #' @param se_calc Logical; whether to compute standard errors.
 #' @param max_iter Maximum number of optimization iterations.
 #' @param tol Convergence tolerance for the optimizer.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
-smle_probit <- function(formula, data, B_basis, x_name, se_calc = TRUE, max_iter = 100, tol = 1e-6) {
+smle_probit <- function(formula, data, Bbasis, x_name, theta_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
   # -- 0. Validate ----
-  if (any(is.na(B_basis))) {
-    stop("The 'B_basis' matrix contains missing values. B-spline basis must be fully computed.")
+  if (any(is.na(Bbasis))) {
+    stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
   }
   cols2check <- setdiff(all.vars(formula), x_name)
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
@@ -23,29 +24,41 @@ smle_probit <- function(formula, data, B_basis, x_name, se_calc = TRUE, max_iter
                paste(missing_cols, collapse = ", "),
                "- Only the column specified in 'x_name' can have missingness."))
   }
-  if (nrow(B_basis) != nrow(data)) {
-    stop("B_basis must have the same number of rows as data.")
+  if (nrow(Bbasis) != nrow(data)) {
+    stop("Bbasis must have the same number of rows as data.")
   }
 
   # -- 1. Construct Data Matrices ----
   mf <- model.frame(formula, data, na.action = na.pass)
-  y_vec <- as.numeric(model.response(mf))
-  X_mat <- model.matrix(formula, mf)[, -1, drop = FALSE]  # remove the intercept (column 1)
+  yvec <- as.numeric(model.response(mf))
+  Xmat <- model.matrix(formula, mf)[, -1, drop = FALSE]  # remove the intercept (column 1)
 
   # Identify selection indicator (assuming S=1 if x_name is NOT NA, and S=0 if x_name is NA)
   s_indicator <- as.numeric(!is.na(data[[x_name]]))
   # Split by selection indicator S
-  y1 <- y_vec[s_indicator == 1]; y0 <- y_vec[s_indicator == 0]
-  X1 <- X_mat[s_indicator == 1, , drop = FALSE]; X0 <- X_mat[s_indicator == 0, , drop = FALSE]
-  B1 <- B_basis[s_indicator == 1, , drop = FALSE]; B0 <- B_basis[s_indicator == 0, , drop = FALSE]
+  y1 <- yvec[s_indicator == 1]; y0 <- yvec[s_indicator == 0]
+  X1 <- Xmat[s_indicator == 1, , drop = FALSE]; X0 <- Xmat[s_indicator == 0, , drop = FALSE]
+  B1 <- Bbasis[s_indicator == 1, , drop = FALSE]; B0 <- Bbasis[s_indicator == 0, , drop = FALSE]
 
   # -- 2. Setup Support ----
   # Support points for X: all unique values observed in Phase 2
   x_support <- sort(unique(data[[x_name]][s_indicator == 1]))
 
   # -- 3. Initialize Parameters ----
-  # Initialize p betas at 0 and K-1 alphas spread from -1 to 1
-  theta_curr <- c(numeric(ncol(X_mat)), seq(-1, 1, length.out = length(unique(y_vec)) - 1))
+  use_defaults <- TRUE
+  if (!is.null(theta_init)) {
+    theta_len <- ncol(Xmat) + (length(unique(yvec)) - 1)
+    if (length(theta_init) == theta_len) {
+      use_defaults <- FALSE
+      theta_curr <- theta_init
+    } else {
+      warning(paste("theta_init must have length", theta_len))
+    }
+  }
+  if (use_defaults) {
+    fit_init <- MASS::polr(formula, data, method = "probit")
+    theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
+  }
   # Initialize p_vl
   p_vl_num_init <- t(outer(data[[x_name]][s_indicator == 1], x_support, "==")) %*% B1  # (d_size, s_n): numerator for initial p_vl
   p_vl_curr <- sweep(p_vl_num_init, 2, colSums(p_vl_num_init) + 1e-12, FUN = "/")      # Column-wise normalization

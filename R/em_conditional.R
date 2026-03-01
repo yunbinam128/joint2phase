@@ -7,6 +7,7 @@
 #' @param formula_cond The \code{formula} used for the ordinal outcome model (\eqn{Y_1}).
 #' @param theta_cond Vector of estimated parameters from the ordinal model (\eqn{\theta_1}).
 #' @param vcov_cond Covariance matrix of \eqn{\theta_1}. Optional; only required if \code{se_calc = TRUE}.
+#' @param theta2_init Optional numeric vector of initial values for theta2.
 #' @param se_calc Logical; whether to compute standard errors for Model 2 parameters. Defaults to TRUE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 100.
 #' @param tol Convergence tolerance.
@@ -17,7 +18,7 @@
 #' @importFrom numDeriv hessian jacobian
 #' @export
 em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = NULL,
-                           se_calc = TRUE, max_iter = 100, tol = 1e-6) {
+                           theta2_init = NULL, se_calc = TRUE, max_iter = 100, tol = 1e-6) {
   # -- 0. Validate ----
   if (se_calc && is.null(vcov_cond)) {
     stop("vcov_cond must be provided when se_calc is TRUE to account for Model 1 uncertainty.")
@@ -46,11 +47,25 @@ em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = 
   y2_vec <- as.numeric(model.response(mf2))
   Xmat_m2 <- model.matrix(formula, mf2)
   p_covs_m2 <- ncol(Xmat_m2)
-  # Initial OLS guess for theta
-  fit_init <- stats::lm(formula, data)
-  gamma_curr <- as.vector(stats::coef(fit_init))
-  sigma22_curr <- stats::var(stats::residuals(fit_init))
-  sigma12_curr <- 0.1  # Initial correlation guess
+  use_defaults <- TRUE
+  if (!is.null(theta2_init)) {
+    theta2_len <- p_covs_m2 + 2
+    if (length(theta2_init) == theta2_len) {
+      use_defaults <- FALSE
+      gamma_curr <- theta2_init[1:p_covs_m2]
+      sigma12_curr <- theta2_init[p_covs_m2 + 1]
+      sigma22_curr <- theta2_init[p_covs_m2 + 2]
+    } else {
+      warning(paste("theta2_init must have length", theta2_len))
+    }
+  }
+  if (use_defaults) {
+    # Initial OLS guess for theta2
+    fit_init <- stats::lm(formula, data)
+    gamma_curr <- as.vector(stats::coef(fit_init))
+    sigma22_curr <- stats::var(stats::residuals(fit_init))
+    sigma12_curr <- 0.1  # Initial correlation guess
+  }
 
   # theta1: fixed in the EM algorithm
   # Truncation bounds for Y1* based on observed category Y1
