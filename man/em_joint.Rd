@@ -8,8 +8,11 @@ em_joint(
   formula1,
   formula2,
   data,
-  B_basis,
+  Bbasis,
   x_name,
+  theta1_init = NULL,
+  theta2_init = NULL,
+  se_calc = TRUE,
   max_iter = 500,
   tol = 1e-06
 )
@@ -21,9 +24,15 @@ em_joint(
 
 \item{data}{Full dataset containing Phase 1 and Phase 2.}
 
-\item{B_basis}{Basis matrix for B-splines of Z1.}
+\item{Bbasis}{Basis matrix for B-splines of Z1.}
 
 \item{x_name}{Name of the expensive covariate X.}
+
+\item{theta1_init}{Optional numeric vector of initial values for theta1.}
+
+\item{theta2_init}{Optional numeric vector of initial values for theta2.}
+
+\item{se_calc}{Logical; if TRUE, computes SEs via profile likelihood.}
 
 \item{max_iter}{Maximum number of EM iterations. Defaults to 500.}
 

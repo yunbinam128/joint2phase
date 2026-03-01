@@ -7,10 +7,11 @@
 smle_probit(
   formula,
   data,
-  B_basis,
+  Bbasis,
   x_name,
+  theta_init = NULL,
   se_calc = TRUE,
-  max_iter = 100,
+  max_iter = 500,
   tol = 1e-06
 )
 }
@@ -19,9 +20,11 @@ smle_probit(
 
 \item{data}{A data frame containing the variables in the formula.}
 
-\item{B_basis}{Basis matrix for the spline basis.}
+\item{Bbasis}{Basis matrix for the spline basis.}
 
 \item{x_name}{Name of the expensive covariate X.}
+
+\item{theta_init}{Optional numeric vector of initial values for theta.}
 
 \item{se_calc}{Logical; whether to compute standard errors.}
 

@@ -11,7 +11,9 @@ em_conditional(
   data,
   formula_cond,
   theta_cond,
-  vcov_cond,
+  vcov_cond = NULL,
+  theta2_init = NULL,
+  se_calc = TRUE,
   max_iter = 100,
   tol = 1e-06
 )
@@ -25,7 +27,11 @@ em_conditional(
 
 \item{theta_cond}{Vector of estimated parameters from the ordinal model (\eqn{\theta_1}).}
 
-\item{vcov_cond}{Covariance matrix of \eqn{\theta_1}, used for standard error adjustment.}
+\item{vcov_cond}{Covariance matrix of \eqn{\theta_1}. Optional; only required if \code{se_calc = TRUE}.}
+
+\item{theta2_init}{Optional numeric vector of initial values for theta2.}
+
+\item{se_calc}{Logical; whether to compute standard errors for Model 2 parameters. Defaults to TRUE.}
 
 \item{max_iter}{Maximum number of EM iterations. Defaults to 100.}
 

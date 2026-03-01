@@ -4,7 +4,7 @@
 \alias{acml_probit}
 \title{ACML under probit}
 \usage{
-acml_probit(formula, data, pi_values)
+acml_probit(formula, data, pi_values, theta_init = NULL)
 }
 \arguments{
 \item{formula}{A model formula specifying the probit model.}
@@ -12,6 +12,8 @@ acml_probit(formula, data, pi_values)
 \item{data}{A data frame containing the variables in the formula.}
 
 \item{pi_values}{Numeric vector of sampling probabilities for ODS.}
+
+\item{theta_init}{Optional numeric vector of initial values for theta.}
 }
 \value{
 A list with parameter estimates.
