@@ -64,7 +64,7 @@ em_joint <- function(formula1, formula2, data, Bbasis, x_name,
     theta1_len <- ncol(Xmat_m1) + (length(unique(y1vec)) - 1)
     if (length(theta1_init) == theta1_len) {
       use_defaults <- FALSE
-      theta_curr <- theta1_init
+      theta1_curr <- theta1_init
     } else {
       warning(paste("theta1_init must have length", theta1_len))
     }
