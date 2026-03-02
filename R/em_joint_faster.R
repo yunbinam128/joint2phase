@@ -60,7 +60,7 @@ em_joint_faster <- function(formula1, formula2, data, Bbasis, x_name,
   # -- 2. Initialize Parameters ----
   # theta1: (beta, alpha/cutpoints)
   use_defaults <- TRUE
-  if (!is.null(theta1_init)) {
+  if (!is.null(theta1_init) & sum(is.na(theta1_init)) < 1) {
     theta1_len <- ncol(Xmat_m1) + (length(unique(y1vec)) - 1)
     if (length(theta1_init) == theta1_len) {
       use_defaults <- FALSE
@@ -76,7 +76,7 @@ em_joint_faster <- function(formula1, formula2, data, Bbasis, x_name,
   }
 
   # theta2: (gamma, sigma12, sigma22)
-  if (!is.null(theta2_init)) {
+  if (!is.null(theta2_init) & sum(is.na(theta2_init)) < 1) {
     theta2_len <- p_covs2 + 2
     if (length(theta2_init) == theta2_len) {
       use_defaults <- FALSE
