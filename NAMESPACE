@@ -3,7 +3,6 @@
 export(acml_probit)
 export(em_conditional)
 export(em_joint)
-export(em_joint_faster)
 export(smle_probit)
 importFrom(Rcpp,evalCpp)
 importFrom(numDeriv,hessian)
