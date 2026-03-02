@@ -133,6 +133,47 @@ compute_ey1_star_s1 <- function(theta1, theta2, y1, y2, Xmat_m1, Xmat_m2) {
   return(list(E = Ey1_star, Var = Vary1_star))
 }
 
+compute_y1star_s1 <- function(theta1, theta2, y1, y2, Xmat_m1, Xmat_m2) {
+  p_covs1 <- ncol(Xmat_m1)
+  beta    <- theta1[1:p_covs1]
+  alpha   <- theta1[(p_covs1 + 1):length(theta1)]
+  alpha_ext <- c(-Inf, alpha, Inf)
+
+  p_covs2 <- ncol(Xmat_m2)
+  gamma   <- theta2[1:p_covs2]
+  sigma12 <- theta2[p_covs2 + 1]
+  sigma22 <- theta2[p_covs2 + 2]
+  if (length(theta2) != p_covs2 + 2) {
+    stop(paste0("Dimension mismatch in 'theta2': expected ", p_covs2 + 2,
+                " elements (", p_covs2, " for gamma + 2 for sigma12/sigma22), but found ",
+                length(theta2), "."))
+  }
+
+  mu1 <- as.vector(Xmat_m1 %*% beta)
+  mu2 <- as.vector(Xmat_m2 %*% gamma)
+
+  # Distribution of Y1* | Y2, X, Z1, Z2 is Normal with:
+  # Mean = mu1 + (sigma12/sigma22)*(Y2 - mu2)
+  # Var  = 1 - (sigma12^2/sigma22)
+  mu_cond <- mu1 + (sigma12 / sigma22) * (y2 - mu2)
+  sd_cond <- sqrt(1 - (sigma12^2 / sigma22))
+
+  idx1 <- which(y1 == 1); idxmax <- which(y1 == max(y1))
+  # Calculate E[Y1* | Y2, Y1, X, Z1, Z2] using Truncated Normal Mean
+  a <- alpha_ext[y1]; b <- alpha_ext[y1 + 1]
+  a_std <- (a - mu_cond) / sd_cond; b_std <- (b - mu_cond) / sd_cond
+  varphi_a <- stats::dnorm(a_std); varphi_b <- stats::dnorm(b_std)
+  Phi_a <- stats::pnorm(a_std); Phi_b <- stats::pnorm(b_std)
+  a_std[idx1] <- 0; b_std[idxmax] <- 0
+  tmp_denom <- pmax(1e-16, Phi_b - Phi_a)  # Numerical stability
+  tmp1 <- (varphi_b - varphi_a) / tmp_denom
+  tmp2 <- (b_std * varphi_b - a_std * varphi_a) / tmp_denom
+  Ey1_star <- mu_cond - sd_cond * tmp1
+  Vary1_star <- sd_cond^2 * (1 - tmp2 - tmp1^2)
+
+  return(list(E = Ey1_star, Var = Vary1_star))
+}
+
 weighted_alpha_nll <- function(alpha, beta, y, X, weights) {
   # Constraint: Cutpoints must be strictly increasing
   if (any(diff(alpha) <= 0)) return(1e10)
