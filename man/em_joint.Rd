@@ -2,7 +2,7 @@
 % Please edit documentation in R/em_joint.R
 \name{em_joint}
 \alias{em_joint}
-\title{EM Algorithm for Joint Modeling - assuming both X and Y2 are available only for subjects selected in Phase 2}
+\title{EM Algorithm for Joint Modeling (Missing X and Y2)}
 \usage{
 em_joint(
   formula1,
@@ -18,29 +18,29 @@ em_joint(
 )
 }
 \arguments{
-\item{formula1}{Formula for the ordinal outcome Y1 (probit).}
+\item{formula1}{Formula for the ordinal outcome Y1 (Model 1).}
 
 \item{formula2}{Formula for the continuous outcome Y2 (Model 2).}
 
-\item{data}{Full dataset containing Phase 1 and Phase 2.}
+\item{data}{Data frame. NA allowed only in \code{x_name} and Y2 for S=0 subjects.}
 
 \item{Bbasis}{Basis matrix for B-splines of Z1.}
 
 \item{x_name}{Name of the expensive covariate X.}
 
-\item{theta1_init}{Optional numeric vector of initial values for theta1.}
+\item{theta1_init}{Optional initial vector for theta1 (beta, cutpoints)}
 
-\item{theta2_init}{Optional numeric vector of initial values for theta2.}
+\item{theta2_init}{Optional initial vector for theta2 (gamma, sigma12, sigma22).}
 
-\item{se_calc}{Logical; if TRUE, computes SEs via profile likelihood.}
+\item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
 \item{max_iter}{Maximum number of EM iterations. Defaults to 500.}
 
-\item{tol}{Convergence tolerance.}
+\item{tol}{Convergence tolerance for the optimizer.}
 }
 \value{
 A list containing estimates and convergence info.
 }
 \description{
-EM Algorithm for Joint Modeling - assuming both X and Y2 are available only for subjects selected in Phase 2
+EM Algorithm for Joint Modeling (Missing X and Y2)
 }

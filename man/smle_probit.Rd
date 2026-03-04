@@ -2,7 +2,7 @@
 % Please edit documentation in R/smle_probit.R
 \name{smle_probit}
 \alias{smle_probit}
-\title{SMLE under probit}
+\title{SMLE under Probit Link}
 \usage{
 smle_probit(
   formula,
@@ -16,19 +16,19 @@ smle_probit(
 )
 }
 \arguments{
-\item{formula}{A model formula for the probit specification.}
+\item{formula}{Formula for the ordinal outcome Y.}
 
-\item{data}{A data frame containing the variables in the formula.}
+\item{data}{Data frame. NA allowed only in \code{x_name} for S=0 subjects.}
 
 \item{Bbasis}{Basis matrix for the spline basis.}
 
 \item{x_name}{Name of the expensive covariate X.}
 
-\item{theta_init}{Optional numeric vector of initial values for theta.}
+\item{theta_init}{Optional initial vector for theta (beta, cutpoints).}
 
-\item{se_calc}{Logical; whether to compute standard errors.}
+\item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
-\item{max_iter}{Maximum number of optimization iterations.}
+\item{max_iter}{Maximum number of EM iterations. Defaults to 500.}
 
 \item{tol}{Convergence tolerance for the optimizer.}
 }
@@ -36,5 +36,5 @@ smle_probit(
 A list containing estimates and convergence info.
 }
 \description{
-SMLE under probit
+SMLE under Probit Link
 }

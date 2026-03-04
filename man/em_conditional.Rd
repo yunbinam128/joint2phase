@@ -2,9 +2,7 @@
 % Please edit documentation in R/em_conditional.R
 \name{em_conditional}
 \alias{em_conditional}
-\title{Estimates parameters for a continuous outcome model conditioned on a previously
-estimated ordinal probit model. This function implements an EM algorithm where
-the latent continuous variable \eqn{Y_1^*} is treated as missing data.}
+\title{EM Algorithm for Conditional Modeling (Step 2 of Two-Step Estimator)}
 \usage{
 em_conditional(
   formula,
@@ -19,29 +17,28 @@ em_conditional(
 )
 }
 \arguments{
-\item{formula}{A \code{formula} object for the continuous outcome (\eqn{Y_2}).}
+\item{formula}{Formula for the continuous outcome Y2 (Model 2).}
 
-\item{data}{A data frame containing the variables in the model.}
+\item{data}{Data frame containing all variables in \code{formula} and \code{formula_cond}. No NA allowed.}
 
-\item{formula_cond}{The \code{formula} used for the ordinal outcome model (\eqn{Y_1}).}
+\item{formula_cond}{Formula for the ordinal outcome Y1 (Model 1).}
 
-\item{theta_cond}{Vector of estimated parameters from the ordinal model (\eqn{\theta_1}).}
+\item{theta_cond}{Vector of estimated parameters from Model 1 (betas, cutpoints).}
 
-\item{vcov_cond}{Covariance matrix of \eqn{\theta_1}. Optional; only required if \code{se_calc = TRUE}.}
+\item{vcov_cond}{Covariance matrix of \code{theta_cond}; required if \code{se_calc} is TRUE.}
 
-\item{theta2_init}{Optional numeric vector of initial values for theta2.}
+\item{theta2_init}{Optional initial vector for theta2 (gamma, sigma12, sigma22).}
 
-\item{se_calc}{Logical; whether to compute standard errors for Model 2 parameters. Defaults to TRUE.}
+\item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
 \item{max_iter}{Maximum number of EM iterations. Defaults to 100.}
 
-\item{tol}{Convergence tolerance.}
+\item{tol}{Convergence tolerance for the optimizer.}
 }
 \value{
 A list containing estimates and convergence info.
 }
 \description{
-Estimates parameters for a continuous outcome model conditioned on a previously
-estimated ordinal probit model. This function implements an EM algorithm where
-the latent continuous variable \eqn{Y_1^*} is treated as missing data.
+Estimates parameters for a continuous outcome (Y2) conditioned on a previously
+estimated ordinal probit model (Y1), treating the latent variable Y1* as missing.
 }

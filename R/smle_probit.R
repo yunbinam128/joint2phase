@@ -1,17 +1,18 @@
-#' SMLE under probit
+#' SMLE under Probit Link
 #'
-#' @param formula A model formula for the probit specification.
-#' @param data A data frame containing the variables in the formula.
+#' @param formula Formula for the ordinal outcome Y.
+#' @param data Data frame. NA allowed only in \code{x_name} for S=0 subjects.
 #' @param Bbasis Basis matrix for the spline basis.
 #' @param x_name Name of the expensive covariate X.
-#' @param theta_init Optional numeric vector of initial values for theta.
-#' @param se_calc Logical; whether to compute standard errors.
-#' @param max_iter Maximum number of optimization iterations.
+#' @param theta_init Optional initial vector for theta (beta, cutpoints).
+#' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
+#' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
-smle_probit <- function(formula, data, Bbasis, x_name, theta_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
+smle_probit <- function(formula, data, Bbasis, x_name,
+                        theta_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
   # -- 0. Validate ----
   if (any(is.na(Bbasis))) {
     stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
@@ -28,23 +29,23 @@ smle_probit <- function(formula, data, Bbasis, x_name, theta_init = NULL, se_cal
     stop("Bbasis must have the same number of rows as data.")
   }
 
-  # -- 1. Construct Data Matrices ----
-  mf <- model.frame(formula, data, na.action = na.pass)
-  yvec <- as.numeric(model.response(mf))
-  Xmat <- model.matrix(formula, mf)[, -1, drop = FALSE]  # remove the intercept (column 1)
-
   # Identify selection indicator (assuming S=1 if x_name is NOT NA, and S=0 if x_name is NA)
   s_indicator <- as.numeric(!is.na(data[[x_name]]))
-  # Split by selection indicator S
-  y1 <- yvec[s_indicator == 1]; y0 <- yvec[s_indicator == 0]
-  X1 <- Xmat[s_indicator == 1, , drop = FALSE]; X0 <- Xmat[s_indicator == 0, , drop = FALSE]
-  B1 <- Bbasis[s_indicator == 1, , drop = FALSE]; B0 <- Bbasis[s_indicator == 0, , drop = FALSE]
-
-  # -- 2. Setup Support ----
+  n1_idx <- which(s_indicator == 1); n0_idx <- which(s_indicator == 0)
   # Support points for X: all unique values observed in Phase 2
-  x_support <- sort(unique(data[[x_name]][s_indicator == 1]))
+  x_support <- sort(unique(data[[x_name]][n1_idx]))
 
-  # -- 3. Initialize Parameters ----
+  # -- 1. Construct Data Matrices ----
+  mf <- stats::model.frame(formula, data, na.action = na.pass)
+  yvec <- as.numeric(stats::model.response(mf))
+  Xmat <- stats::model.matrix(formula, mf)[, -1, drop = FALSE]  # Remove intercept
+  # Split by selection indicator S
+  yvec_s1 <- yvec[n1_idx]; yvec_s0 <- yvec[n0_idx]
+  Xmat_s1 <- Xmat[n1_idx, , drop = FALSE]; Xmat_s0 <- Xmat[n0_idx, , drop = FALSE]
+  Bbasis_s1 <- Bbasis[n1_idx, , drop = FALSE]; Bbasis_s0 <- Bbasis[n0_idx, , drop = FALSE]
+
+  # -- 2. Initialize Parameters ----
+  # theta: (beta, cutpoints)
   use_defaults <- TRUE
   if (!is.null(theta_init)) {
     theta_len <- ncol(Xmat) + (length(unique(yvec)) - 1)
@@ -59,55 +60,49 @@ smle_probit <- function(formula, data, Bbasis, x_name, theta_init = NULL, se_cal
     fit_init <- MASS::polr(formula, data, method = "probit")
     theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
   }
-  # Initialize p_vl
-  p_vl_num_init <- t(outer(data[[x_name]][s_indicator == 1], x_support, "==")) %*% B1  # (d_size, s_n): numerator for initial p_vl
-  p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")      # Column-wise normalization
 
-  # -- 4. EM Algorithm Loop ----
+  # p_vl: normalized sieve coefficients
+  p_vl_num_init <- t(outer(data[[x_name]][n1_idx], x_support, "==")) %*% Bbasis_s1  # (d, s_n)
+  p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
+
+  # -- 3. EM Loop ----
+  converged <- FALSE
   for (iter in 1:max_iter) {
     theta_old <- theta_curr
 
-    ## -- E-STEP: Compute expectations for S=0 ----
-    # Calculate P(Y_i | x_v, Z_i; theta) for all i in S=0 and all v in support
-    prob_y0_v <- compute_prob_matrix(theta_curr, y0, X0, x_support, x_name)  # (n0, d_size)
-    # Calculate weights
-    # Marginal P(X=v | Z) = sum_l { B_l(Z) * p_vl }
-    prob_x_v_given_z0 <- B0 %*% t(p_vl_curr)
-    # Compute q_iv weights: P(X=v | Y, Z; theta, p_vl)
-    joint_y_x_v <- prob_y0_v * prob_x_v_given_z0
-    denom_y0    <- pmax(1e-16, rowSums(joint_y_x_v))
-    q_iv        <- joint_y_x_v / denom_y0
+    ## -- E-STEP ----
+    # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, x_name)  # (n0, d)
+    w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
 
-    # -- M-STEP: Update parameters ----
-    # Update theta (theta = argmax weighted log-likelihood)
-    # weights=1 for S=1 and weights=q_iv for S=0 (each subject i is repeated d times for S=0)
-    theta_curr <- update_theta_weighted(theta_curr, q_iv, y1, X1, y0, X0, x_support, x_name)
-    # Update p_vl
-    p_vl_curr <- update_p_vl_cpp(prob_y0_v, B0, p_vl_curr, p_vl_num_init, max_iter, tol)
+    # -- M-STEP ----
+    # Update theta(m+1)
+    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name)
+    # Update p_vl(m+1)
+    p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
-    # Check Convergence
-    if (max(abs(theta_curr - theta_old)) < tol) break
+    # Check convergence
+    if (max(abs(theta_curr - theta_old)) < tol) {
+      converged <- TRUE
+      break
+    }
   }
 
-  # -- 5. Standard Error Estimation via profile log-likelihood (se_calc = TRUE) ----
+  if (!converged) {
+    warning("EM algorithm reached max_iter without converging to tolerance.")
+  }
+
+  # -- 4. Standard Error Estimation ----
   se <- NULL
   vcov <- NULL
   if (se_calc) {
-    se_results <- estimate_smle_se(
-      theta_hat = theta_curr,
-      p_vl_hat = p_vl_curr,
-      p_vl_R1 = p_vl_num_init,
-      y1, X1, y0, X0, B0, x_support, x_name
+    se_results <- estimate_se_smle(
+      theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name
     )
     se <- se_results$se
     vcov <- se_results$vcov
   }
 
-  return(list(
-    theta = theta_curr,
-    p_vl = p_vl_curr,
-    se = se,
-    vcov = vcov,
-    iterations = iter
-  ))
+  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr, iterations = iter))
 }

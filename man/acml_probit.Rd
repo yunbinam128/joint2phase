@@ -2,22 +2,22 @@
 % Please edit documentation in R/acml_probit.R
 \name{acml_probit}
 \alias{acml_probit}
-\title{ACML under probit}
+\title{ACML under Probit Link}
 \usage{
 acml_probit(formula, data, pi_values, theta_init = NULL)
 }
 \arguments{
-\item{formula}{A model formula specifying the probit model.}
+\item{formula}{Formula for the ordinal outcome Y.}
 
-\item{data}{A data frame containing the variables in the formula.}
+\item{data}{Data frame containing all variables in \code{formula}. No NA allowed.}
 
 \item{pi_values}{Numeric vector of sampling probabilities for ODS.}
 
-\item{theta_init}{Optional numeric vector of initial values for theta.}
+\item{theta_init}{Optional initial vector for theta (beta, cutpoints).}
 }
 \value{
-A list with parameter estimates.
+A list with containing estimates.
 }
 \description{
-ACML under probit
+ACML under Probit Link
 }
