@@ -98,7 +98,7 @@ compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_name) {
   # Vectorized calculation of mu for all support points v
   # mu_iv = mu_fixed_i + beta_x * x_v
   beta_x <- beta[xcol_idx]
-  mu_mat <- outer(mu_fixed, beta_x * x_support, "+")  # (n0, d_size)
+  mu_mat <- outer(mu_fixed, as.vector(x_support %*% beta_x), "+")  # (n0, d_size)
 
   # Calculate ordered probit probabilities for all i, v simultaneously
   alpha_ext <- c(-Inf, alpha, Inf)
@@ -126,16 +126,16 @@ compute_w_iv_s0 <- function(prob_y_given_xv_s0, p_vl, Bbasis_s0) {
 update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name) {
   n1 <- length(yvec_s1)
   n0 <- length(yvec_s0)
-  d_size <- length(x_support)
+  d_size <- nrow(x_support)
 
   # Prepare S=1 data: Weights are simply 1
 
   # Prepare S=0 data: Repeat each person in S=0 for every support point x_v
   yvec_s0_long <- rep(yvec_s0, each = d_size)
-  w_iv_s0_long <- as.vector(t(w_iv))  # (n0, d_size)
+  w_iv_s0_long <- as.vector(t(w_iv))  # (n0 * d_size)
 
   Xmat_s0_long <- Xmat_s0[rep(1:n0, each = d_size), , drop = FALSE]
-  Xmat_s0_long[, x_name] <- rep(x_support, n0)
+  Xmat_s0_long[, x_name] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
 
   # Combine S=1 and S=0
   yvec_full <- c(yvec_s1, yvec_s0_long)
@@ -309,7 +309,7 @@ compute_y1star_s0 <- function(theta1, y1vec_s0, Xmat_m1_s0, x_support, x_name) {
   # Vectorized calculation of mu for all support points v
   # mu_iv = mu_fixed_i + beta_x * x_v
   beta_x <- beta[xcol_idx]
-  mu_mat <- outer(mu_fixed, beta_x * x_support, "+")  # (n0, d_size)
+  mu_mat <- outer(mu_fixed, as.vector(x_support %*% beta_x), "+")  # (n0, d_size)
 
   # Calculate truncated normal mean
   alpha_ext <- c(-Inf, alpha, Inf)
@@ -355,7 +355,7 @@ update_theta2 <- function(theta1, theta2, y1vec, y2vec, Xmat_m1, Xmat_m2, e_y1st
 update_theta1 <- function(theta1, y1vec_s1, y1vec_s0, Xmat_m1_s1, Xmat_m1_s0,
                           w_iv, e_y1star_s1, e_y1star_s0, x_support, x_name) {
   n0 <- length(y1vec_s0)
-  d_size <- length(x_support)
+  d_size <- nrow(x_support)
 
   # Prepare S=1 data: Weights are simply 1
 
@@ -364,7 +364,7 @@ update_theta1 <- function(theta1, y1vec_s1, y1vec_s0, Xmat_m1_s1, Xmat_m1_s0,
   w_iv_s0_long <- as.vector(t(w_iv))
 
   Xmat_m1_s0_long <- Xmat_m1_s0[rep(1:n0, each = d_size), , drop = FALSE]
-  Xmat_m1_s0_long[, x_name] <- rep(x_support, n0)
+  Xmat_m1_s0_long[, x_name] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
 
   # Combine S=1 and S=0
   y1vec_full <- c(y1vec_s1, y1vec_s0_long)

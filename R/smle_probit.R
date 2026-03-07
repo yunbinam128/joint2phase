@@ -32,8 +32,6 @@ smle_probit <- function(formula, data, Bbasis, x_name,
   # Identify selection indicator (assuming S=1 if x_name is NOT NA, and S=0 if x_name is NA)
   s_indicator <- as.numeric(!is.na(data[[x_name]]))
   n1_idx <- which(s_indicator == 1); n0_idx <- which(s_indicator == 0)
-  # Support points for X: all unique values observed in Phase 2
-  x_support <- sort(unique(data[[x_name]][n1_idx]))
 
   # -- 1. Construct Data Matrices ----
   mf <- stats::model.frame(formula, data, na.action = na.pass)
@@ -43,6 +41,9 @@ smle_probit <- function(formula, data, Bbasis, x_name,
   yvec_s1 <- yvec[n1_idx]; yvec_s0 <- yvec[n0_idx]
   Xmat_s1 <- Xmat[n1_idx, , drop = FALSE]; Xmat_s0 <- Xmat[n0_idx, , drop = FALSE]
   Bbasis_s1 <- Bbasis[n1_idx, , drop = FALSE]; Bbasis_s0 <- Bbasis[n0_idx, , drop = FALSE]
+  # Support points for X: all unique values observed in Phase 2
+  x_name <- colnames(Xmat)[grepl(x_name, colnames(Xmat), fixed = TRUE)]
+  x_support <- unique(Xmat_s1[, x_name, drop = FALSE])
 
   # -- 2. Initialize Parameters ----
   # theta: (beta, cutpoints)
@@ -62,7 +63,9 @@ smle_probit <- function(formula, data, Bbasis, x_name,
   }
 
   # p_vl: normalized sieve coefficients
-  p_vl_num_init <- t(outer(data[[x_name]][n1_idx], x_support, "==")) %*% Bbasis_s1  # (d, s_n)
+  s1_keys <- do.call(paste, as.data.frame(Xmat_s1[, x_name, drop = FALSE]))
+  support_keys <- do.call(paste, as.data.frame(x_support))
+  p_vl_num_init <- t(outer(s1_keys, support_keys, "==")) %*% Bbasis_s1  # (d, s_n)
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
 
   # -- 3. EM Loop ----
