@@ -2,25 +2,30 @@
 ## -- ACML Helpers ----
 # Negative ascertainment-corrected log-likelihood
 # called by acml_probit()
-acml_probit_nll <- function(theta, yvec, Xmat, pi_perY) {
+acml_probit_nll <- function(theta, yvec, Xmat, pi_perY, family) {
   K <- length(pi_perY)
   p <- ncol(Xmat)
 
   # Extract parameters
   beta <- theta[1:p]
-  alpha <- theta[(p+1):(p+K-1)]
+  alpha <- theta[(p + 1):(p + K - 1)]
   if (any(diff(alpha) <= 0)) return(1e10)  # Constraint: Cutpoints must be strictly increasing
   mu <- as.vector(Xmat %*% beta)  # Linear predictor
 
   # Calculate category probabilities P(Y=m | X)
   p_m <- matrix(0, nrow = nrow(Xmat), ncol = K)
-  p_m[, 1] <- stats::pnorm(alpha[1] - mu)
+  if (family == "probit") {
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    F_link <- stats::plogis
+  }
+  p_m[, 1] <- F_link(alpha[1] - mu)
   if (K > 2) {
     for (m in 2:(K-1)) {
-      p_m[, m] <- stats::pnorm(alpha[m] - mu) - stats::pnorm(alpha[m-1] - mu)
+      p_m[, m] <- F_link(alpha[m] - mu) - F_link(alpha[m-1] - mu)
     }
   }
-  p_m[, K] <- 1 - stats::pnorm(alpha[K-1] - mu)
+  p_m[, K] <- 1 - F_link(alpha[K-1] - mu)
 
   # Ascertainment-corrected likelihood
   # Numerator: Probability of the observed outcome
@@ -35,25 +40,32 @@ acml_probit_nll <- function(theta, yvec, Xmat, pi_perY) {
 
 # Analytical derivatives for ACML optimization
 # called by acml_probit()
-acml_probit_grad <- function(theta, yvec, Xmat, pi_perY) {
+acml_probit_grad <- function(theta, yvec, Xmat, pi_perY, family) {
   K <- length(pi_perY)
   n <- nrow(Xmat)
   p <- ncol(Xmat)
 
   # Extract parameters
   beta <- theta[1:p]
-  alpha <- theta[(p+1):(p+K-1)]
+  alpha <- theta[(p + 1):(p + K - 1)]
   mu <- as.vector(Xmat %*% beta)
   yobs <- as.numeric(yvec)
 
   # Pre-calculate normal PDF (phi) and CDF (Phi) at each cutpoint
   phi_mat <- matrix(0, nrow = n, ncol = K+1)
   Phi_mat <- matrix(0, nrow = n, ncol = K+1)
-  Phi_mat[, K+1] <- 1  # Phi(Inf) = 1
-  for(j in 1:(K-1)) {
+  Phi_mat[, K + 1] <- 1  # Phi(Inf) = 1
+  if (family == "probit") {
+    f_link <- stats::dnorm
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    f_link <- stats::dlogis
+    F_link <- stats::plogis
+  }
+  for(j in 1:(K - 1)) {
     z <- alpha[j] - mu
-    Phi_mat[, j+1] <- stats::pnorm(z)
-    phi_mat[, j+1] <- stats::dnorm(z)
+    Phi_mat[, j + 1] <- F_link(z)
+    phi_mat[, j + 1] <- f_link(z)
   }
   p_m <- Phi_mat[, 2:(K+1)] - Phi_mat[, 1:K]
   D <- as.vector(p_m %*% pi_perY)

@@ -8,8 +8,11 @@
 #'
 #' @return A list with containing estimates.
 #' @export
-acml_probit <- function(formula, data, pi_values, family = "probit", theta_init = NULL) {
+orm_acml <- function(formula, data, pi_values, family = "probit", theta_init = NULL) {
   # -- 0. Validate ----
+  if (!(family %in% c("probit", "logistic"))) {
+    stop("The 'family' must be \"probit\" or \"logistic\".")
+  }
   na_counts <- colSums(is.na(data[, all.vars(formula), drop = FALSE]))
   if (any(na_counts > 0)) {
     missing_cols <- names(na_counts[na_counts > 0])
@@ -35,18 +38,14 @@ acml_probit <- function(formula, data, pi_values, family = "probit", theta_init 
     }
   }
   if (use_defaults) {
-    fit_init <- MASS::polr(formula, data, method = "probit")
+    fit_init <- MASS::polr(formula, data, method = family)
     theta_init <- as.vector(c(fit_init$coefficients, fit_init$zeta))
   }
-  beta_names <- colnames(Xmat)
-  if (is.null(beta_names)) beta_names <- paste0("beta", 1:p)
-  alpha_names <- paste0("(Intercept:", 1:(K-1), ")")
-  names(theta_init) <- c(beta_names, alpha_names)
 
   # -- 3. Optimization ----
   fit <- stats::optim(
     par = theta_init, fn = acml_probit_nll, gr = acml_probit_grad,
-    yvec = yvec, Xmat = Xmat, pi_perY = pi_values,
+    yvec = yvec, Xmat = Xmat, pi_perY = pi_values, family,
     method = "BFGS", hessian = TRUE
   )
 
