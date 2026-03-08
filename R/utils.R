@@ -83,13 +83,13 @@ acml_probit_grad <- function(theta, yvec, Xmat, pi_perY) {
 ## -- SMLE Helpers ----
 # Compute P(Y_i | x_v, Z_i; theta) for S=0 across x_v in x_support
 # called by smle_probit(), em_joint()
-compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_name) {
+compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_colname, family = "probit") {
   pcovs <- ncol(Xmat_s0)
   beta <- theta[1:pcovs]
-  alpha <- theta[(pcovs+1):length(theta)]
+  alpha <- theta[(pcovs + 1):length(theta)]
 
   # Pre-calculate the linear predictor for Z (excluding X)
-  xcol_idx <- which(colnames(Xmat_s0) == x_name)
+  xcol_idx <- which(colnames(Xmat_s0) == x_colname)
   beta_Z <- beta[-xcol_idx]
   Zmat_s0 <- Xmat_s0[, -xcol_idx, drop = FALSE]
   # Constant part of mu for each subject: mu_fixed = Z %*% beta_z
@@ -102,7 +102,12 @@ compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_name) {
 
   # Calculate ordered probit probabilities for all i, v simultaneously
   alpha_ext <- c(-Inf, alpha, Inf)
-  probs <- stats::pnorm(alpha_ext[yvec_s0+1] - mu_mat) - stats::pnorm(alpha_ext[yvec_s0] - mu_mat)
+  if (family == "probit") {
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    F_link <- stats::plogis
+  }
+  probs <- F_link(alpha_ext[yvec_s0 + 1] - mu_mat) - F_link(alpha_ext[yvec_s0] - mu_mat)
   probs[probs < 1e-16] <- 1e-16  # Prevent exactly zero probabilities
 
   return(probs)
@@ -123,7 +128,7 @@ compute_w_iv_s0 <- function(prob_y_given_xv_s0, p_vl, Bbasis_s0) {
 ## -- M-Step in EM Algorithm ----
 # Update theta in M-step
 # called by smle_probit()
-update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name) {
+update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_colname, family) {
   n1 <- length(yvec_s1)
   n0 <- length(yvec_s0)
   d_size <- nrow(x_support)
@@ -135,7 +140,7 @@ update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x
   w_iv_s0_long <- as.vector(t(w_iv))  # (n0 * d_size)
 
   Xmat_s0_long <- Xmat_s0[rep(1:n0, each = d_size), , drop = FALSE]
-  Xmat_s0_long[, x_name] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
+  Xmat_s0_long[, x_colname] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
 
   # Combine S=1 and S=0
   yvec_full <- c(yvec_s1, yvec_s0_long)
@@ -145,7 +150,7 @@ update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x
   # Optimize
   fit <- stats::optim(
     par = theta, fn = weighted_nll, gr = weighted_grad,
-    yvec = yvec_full, Xmat = Xmat_full, w_iv = w_iv_full, method = "BFGS"
+    yvec = yvec_full, Xmat = Xmat_full, w_iv = w_iv_full, family, method = "BFGS"
   )
 
   return(fit$par)
@@ -153,10 +158,10 @@ update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x
 
 # Weighted negative log-likelihood for SMLE optimization
 # called by update_theta_smle()
-weighted_nll <- function(theta, yvec, Xmat, w_iv) {
+weighted_nll <- function(theta, yvec, Xmat, w_iv, family) {
   pcovs <- ncol(Xmat)
   beta <- theta[1:pcovs]
-  alpha <- theta[(pcovs+1):length(theta)]
+  alpha <- theta[(pcovs + 1):length(theta)]
 
   # Constraint: Cutpoints must be strictly increasing
   if (any(diff(alpha) <= 0)) return(1e10)
@@ -164,7 +169,12 @@ weighted_nll <- function(theta, yvec, Xmat, w_iv) {
   # Probability Calculation: P(Y=k) = Phi(alpha_k - mu) - Phi(alpha_{k-1} - mu)
   mu <- as.vector(Xmat %*% beta)
   alpha_ext <- c(-Inf, alpha, Inf)
-  p_y <- stats::pnorm(alpha_ext[yvec+1] - mu) - stats::pnorm(alpha_ext[yvec] - mu)
+  if (family == "probit") {
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    F_link <- stats::plogis
+  }
+  p_y <- F_link(alpha_ext[yvec + 1] - mu) - F_link(alpha_ext[yvec] - mu)
   p_y <- pmax(1e-16, p_y)  # Numerical stability
 
   return(-sum(w_iv * log(p_y)))
@@ -172,18 +182,25 @@ weighted_nll <- function(theta, yvec, Xmat, w_iv) {
 
 # Analytical derivatives for SMLE optimization
 # called by update_theta_smle()
-weighted_grad <- function(theta, yvec, Xmat, w_iv) {
+weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
   pcovs <- ncol(Xmat)
   beta <- theta[1:pcovs]
-  alpha <- theta[(pcovs+1):length(theta)]
+  alpha <- theta[(pcovs + 1):length(theta)]
 
   if (any(diff(alpha) <= 0)) return(rep(0, length(theta)))
 
   mu <- as.vector(Xmat %*% beta)
   alpha_ext <- c(-Inf, alpha, Inf)
   z_u <- alpha_ext[yvec+1] - mu; z_l <- alpha_ext[yvec] - mu
-  phi_u <- stats::dnorm(z_u); phi_l <- stats::dnorm(z_l)
-  p_y <- pmax(1e-16, stats::pnorm(z_u) - stats::pnorm(z_l))  # Numerical Stability
+  if (family == "probit") {
+    f_link <- stats::dnorm
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    f_link <- stats::dlogis
+    F_link <- stats::plogis
+  }
+  phi_u <- f_link(z_u); phi_l <- f_link(z_l)
+  p_y <- pmax(1e-16, F_link(z_u) - F_link(z_l))  # Numerical Stability
 
   # Gradient for beta
   d_mu <- (phi_l - phi_u) / p_y
@@ -204,10 +221,10 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv) {
 ## -- SE Estimation ----
 # Estimate SE via profile likelihood
 # called by smle_probit()
-estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name) {
+estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family) {
   # Define the function to differentiate
   obj_func <- function(t) {
-    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name)
+    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family)
   }
 
   # Calculate Hessian numerically
@@ -226,29 +243,34 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
 # Profile log-likelihood
 # called by estimate_se_smle()
 smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
-                           x_support, x_name, max_iter = 100, tol = 1e-8) {
+                            x_support, x_colname, family, max_iter = 500, tol = 1e-8) {
   # Pre-compute prob_y0_v for FIXED theta
-  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_name)
+  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
 
   # EM Loop: Update only p_vl
   p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
 
-  return(smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name))
+  return(smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family))
 }
 
 # Calculate log-likelihood at fixed theta, p_vl
 # called by estimate_se_smle()
-smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name) {
+smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family) {
   # For S=1, we need P(Y|X,Z)
   pcovs <- ncol(Xmat_s1)
   beta <- theta[1:pcovs]
-  alpha <- theta[(pcovs+1):length(theta)]
+  alpha <- theta[(pcovs + 1):length(theta)]
   mu_s1 <- as.vector(Xmat_s1 %*% beta)
   alpha_ext <- c(-Inf, alpha, Inf)
-  prob_s1 <- pmax(1e-16, stats::pnorm(alpha_ext[yvec_s1+1] - mu_s1) - stats::pnorm(alpha_ext[yvec_s1] - mu_s1))
+  if (family == "probit") {
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    F_link <- stats::plogis
+  }
+  prob_s1 <- pmax(1e-16, F_link(alpha_ext[yvec_s1 + 1] - mu_s1) - F_link(alpha_ext[yvec_s1] - mu_s1))
 
   # For S=0, we need P(Y|Z) = sum_v sum_l P(Y|x_v, Z) * B_l(Z) * p_vl
-  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_name)
+  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
   prob_xv_s0 <- Bbasis_s0 %*% t(p_vl)
   prob_s0 <- pmax(1e-16, rowSums(prob_y_given_xv_s0 * prob_xv_s0))
 
@@ -262,7 +284,7 @@ smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbas
 compute_y1star_s1 <- function(theta1, theta2, y1vec_s1, y2vec, Xmat_m1_s1, Xmat_m2, mu1 = NULL) {
   pcovs_m1 <- ncol(Xmat_m1_s1)
   beta <- theta1[1:pcovs_m1]
-  alpha <- theta1[(pcovs_m1+1):length(theta1)]
+  alpha <- theta1[(pcovs_m1 + 1):length(theta1)]
 
   pcovs_m2 <- ncol(Xmat_m2)
   gamma <- theta2[1:pcovs_m2]
@@ -294,13 +316,13 @@ compute_y1star_s1 <- function(theta1, theta2, y1vec_s1, y2vec, Xmat_m1_s1, Xmat_
 
 # Compute E[Y1* | x_v, Z, Y1, theta1(m)] for S=0
 # called by em_joint()
-compute_y1star_s0 <- function(theta1, y1vec_s0, Xmat_m1_s0, x_support, x_name) {
+compute_y1star_s0 <- function(theta1, y1vec_s0, Xmat_m1_s0, x_support, x_colname) {
   pcovs_m1 <- ncol(Xmat_m1_s0)
   beta <- theta1[1:pcovs_m1]
   alpha <- theta1[(pcovs_m1+1):length(theta1)]
 
   # Pre-calculate the linear predictor for Z (excluding X)
-  xcol_idx <- which(colnames(Xmat_m1_s0) == x_name)
+  xcol_idx <- which(colnames(Xmat_m1_s0) == x_colname)
   beta_Z <- beta[-xcol_idx]
   Zmat_m1_s0 <- Xmat_m1_s0[, -xcol_idx, drop = FALSE]
   # Constant part of mu for each subject: mu_fixed = Z %*% beta_z
@@ -353,7 +375,7 @@ update_theta2 <- function(theta1, theta2, y1vec, y2vec, Xmat_m1, Xmat_m2, e_y1st
 # Update theta in M-step
 # called by em_joint()
 update_theta1 <- function(theta1, y1vec_s1, y1vec_s0, Xmat_m1_s1, Xmat_m1_s0,
-                          w_iv, e_y1star_s1, e_y1star_s0, x_support, x_name) {
+                          w_iv, e_y1star_s1, e_y1star_s0, x_support, x_colname) {
   n0 <- length(y1vec_s0)
   d_size <- nrow(x_support)
 
@@ -364,7 +386,7 @@ update_theta1 <- function(theta1, y1vec_s1, y1vec_s0, Xmat_m1_s1, Xmat_m1_s0,
   w_iv_s0_long <- as.vector(t(w_iv))
 
   Xmat_m1_s0_long <- Xmat_m1_s0[rep(1:n0, each = d_size), , drop = FALSE]
-  Xmat_m1_s0_long[, x_name] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
+  Xmat_m1_s0_long[, x_colname] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
 
   # Combine S=1 and S=0
   y1vec_full <- c(y1vec_s1, y1vec_s0_long)

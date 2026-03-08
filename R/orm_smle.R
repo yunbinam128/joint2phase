@@ -4,7 +4,7 @@
 #' @param data Data frame. NA allowed only in \code{x_name} for S=0 subjects.
 #' @param Bbasis Basis matrix for the spline basis.
 #' @param x_name Name of the expensive covariate X.
-#' @param family Link function: "probit" or "logistic"
+#' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
 #' @param theta_init Optional initial vector for theta (beta, cutpoints).
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
@@ -15,9 +15,6 @@
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
                      theta_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
   # -- 0. Validate ----
-  if (!(family %in% c("probit", "logistic"))) {
-    stop("The 'family' must be \"probit\" or \"logistic\".")
-  }
   if (any(is.na(Bbasis))) {
     stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
   }
@@ -46,8 +43,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   Xmat_s1 <- Xmat[n1_idx, , drop = FALSE]; Xmat_s0 <- Xmat[n0_idx, , drop = FALSE]
   Bbasis_s1 <- Bbasis[n1_idx, , drop = FALSE]; Bbasis_s0 <- Bbasis[n0_idx, , drop = FALSE]
   # Support points for X: all unique values observed in Phase 2
-  x_colname <- colnames(Xmat)[grepl(x_name, colnames(Xmat), fixed = TRUE)]
-  x_support <- unique(Xmat_s1[, x_colname, drop = FALSE])
+  x_name <- colnames(Xmat)[grepl(x_name, colnames(Xmat), fixed = TRUE)]
+  x_support <- unique(Xmat_s1[, x_name, drop = FALSE])
 
   # -- 2. Initialize Parameters ----
   # theta: (beta, cutpoints)
@@ -58,16 +55,16 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
       use_defaults <- FALSE
       theta_curr <- theta_init
     } else {
-      warning(paste0("theta_init must have length", theta_len, ". Using defaults."))
+      warning(paste("theta_init must have length", theta_len))
     }
   }
   if (use_defaults) {
-    fit_init <- MASS::polr(formula, data, method = family)
+    fit_init <- MASS::polr(formula, data, method = "probit")
     theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
   }
 
   # p_vl: normalized sieve coefficients
-  s1_keys <- do.call(paste, as.data.frame(Xmat_s1[, x_colname, drop = FALSE]))
+  s1_keys <- do.call(paste, as.data.frame(Xmat_s1[, x_name, drop = FALSE]))
   support_keys <- do.call(paste, as.data.frame(x_support))
   p_vl_num_init <- t(outer(s1_keys, support_keys, "==")) %*% Bbasis_s1  # (d, s_n)
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
@@ -79,12 +76,12 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
 
     ## -- E-STEP ----
     # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
-    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, x_colname, family)  # (n0, d)
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, x_name)  # (n0, d)
     w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
 
     # -- M-STEP ----
     # Update theta(m+1)
-    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_colname, family)
+    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name)
     # Update p_vl(m+1)
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
@@ -105,7 +102,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name
     )
     se <- se_results$se
     vcov <- se_results$vcov

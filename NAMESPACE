@@ -3,6 +3,6 @@
 export(acml_probit)
 export(em_conditional)
 export(em_joint)
-export(smle_probit)
+export(orm_smle)
 importFrom(Rcpp,evalCpp)
 useDynLib(joint2phase, .registration = TRUE)

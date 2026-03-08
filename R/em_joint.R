@@ -109,7 +109,7 @@ em_joint <- function(formula1, formula2, data, Bbasis, x_name,
 
     ## -- E-STEP ----
     # For S=0, compute w_v = E[Iv | Y1, Z, theta1(m), p_vl(m)]
-    prob_y1_given_xv_s0 <- compute_py_given_xv_s0(theta1_curr, y1vec_s0, Xmat_m1_s0, x_support, x_name)  # (n0, d)
+    prob_y1_given_xv_s0 <- compute_py_given_xv_s0(theta1_curr, y1vec_s0, Xmat_m1_s0, x_support, x_name, family = "probit")  # (n0, d)
     w_iv <- compute_w_iv_s0(prob_y1_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
     # For S=0, compute E[Y1* | x_v, Z, Y1, theta1(m)]
     e_y1star_s0 <- compute_y1star_s0(theta1_curr, y1vec_s0, Xmat_m1_s0, x_support, x_name)  # (n0, d)
