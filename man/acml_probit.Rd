@@ -2,9 +2,9 @@
 % Please edit documentation in R/acml_probit.R
 \name{acml_probit}
 \alias{acml_probit}
-\title{ACML under Probit Link}
+\title{Ascertainment Corrected Maximum Likelihood (ACML)under two-phase sampling designs for ordinal outcomes}
 \usage{
-acml_probit(formula, data, pi_values, theta_init = NULL)
+acml_probit(formula, data, pi_values, family = "probit", theta_init = NULL)
 }
 \arguments{
 \item{formula}{Formula for the ordinal outcome Y.}
@@ -13,11 +13,13 @@ acml_probit(formula, data, pi_values, theta_init = NULL)
 
 \item{pi_values}{Numeric vector of sampling probabilities for ODS.}
 
+\item{family}{Character value specifying the distribution family, which is one of the following: "logit", "probit"}
+
 \item{theta_init}{Optional initial vector for theta (beta, cutpoints).}
 }
 \value{
 A list with containing estimates.
 }
 \description{
-ACML under Probit Link
+Ascertainment Corrected Maximum Likelihood (ACML)under two-phase sampling designs for ordinal outcomes
 }

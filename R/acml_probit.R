@@ -1,13 +1,14 @@
-#' ACML under Probit Link
+#' Ascertainment Corrected Maximum Likelihood (ACML)under two-phase sampling designs for ordinal outcomes
 #'
 #' @param formula Formula for the ordinal outcome Y.
 #' @param data Data frame containing all variables in \code{formula}. No NA allowed.
 #' @param pi_values Numeric vector of sampling probabilities for ODS.
+#' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
 #' @param theta_init Optional initial vector for theta (beta, cutpoints).
 #'
 #' @return A list with containing estimates.
 #' @export
-acml_probit <- function(formula, data, pi_values, theta_init = NULL) {
+acml_probit <- function(formula, data, pi_values, family = "probit", theta_init = NULL) {
   # -- 0. Validate ----
   na_counts <- colSums(is.na(data[, all.vars(formula), drop = FALSE]))
   if (any(na_counts > 0)) {

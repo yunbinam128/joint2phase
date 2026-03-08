@@ -1,4 +1,4 @@
-#' SMLE under Probit Link
+#' Sieve Maximum Likelihood Estimator (SMLE) under two-phase sampling designs for ordinal outcomes
 #'
 #' @param formula Formula for the ordinal outcome Y.
 #' @param data Data frame. NA allowed only in \code{x_name} for S=0 subjects.
@@ -15,6 +15,9 @@
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
                      theta_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
   # -- 0. Validate ----
+  if (!(family %in% c("probit", "logistic"))) {
+    stop("The 'family' must be \"probit\" or \"logistic\".")
+  }
   if (any(is.na(Bbasis))) {
     stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
   }
@@ -59,7 +62,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     }
   }
   if (use_defaults) {
-    fit_init <- MASS::polr(formula, data, method = "probit")
+    fit_init <- MASS::polr(formula, data, method = family)
     theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
   }
 
@@ -76,12 +79,12 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
 
     ## -- E-STEP ----
     # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
-    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, x_name)  # (n0, d)
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, x_name, family)  # (n0, d)
     w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
 
     # -- M-STEP ----
     # Update theta(m+1)
-    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name)
+    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name, family)
     # Update p_vl(m+1)
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
@@ -102,7 +105,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name, family
     )
     se <- se_results$se
     vcov <- se_results$vcov
