@@ -233,10 +233,10 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 ## -- SE Estimation ----
 # Estimate SE via profile likelihood
 # called by smle_probit()
-estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family) {
+estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol) {
   # Define the function to differentiate
   obj_func <- function(t) {
-    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family)
+    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol)
   }
 
   # Calculate Hessian numerically
@@ -255,7 +255,7 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
 # Profile log-likelihood
 # called by estimate_se_smle()
 smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
-                            x_support, x_colname, family, max_iter = 500, tol = 1e-8) {
+                            x_support, x_colname, family, max_iter, tol) {
   # Pre-compute prob_y0_v for FIXED theta
   prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
 
