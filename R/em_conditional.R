@@ -23,7 +23,7 @@ em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = 
     stop("vcov_cond must be provided when se_calc is TRUE to account for Model 1 uncertainty.")
   }
 
-  cols2check <- unique(c(all.vars(formula), all.vars(formula_cond)))
+  cols2check <- intersect(unique(c(all.vars(formula), all.vars(formula_cond))), colnames(data))
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
   if (any(na_counts > 0)) {
     missing_cols <- names(na_counts[na_counts > 0])

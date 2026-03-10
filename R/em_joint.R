@@ -20,7 +20,7 @@ em_joint <- function(formula1, formula2, data, Bbasis, x_name,
   if (any(is.na(Bbasis))) {
     stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
   }
-  cols2check <- setdiff(all.vars(formula1), x_name)
+  cols2check <- intersect(setdiff(all.vars(formula1), x_name), colnames(data))
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
   if (any(na_counts > 0)) {
     missing_cols <- names(na_counts[na_counts > 0])

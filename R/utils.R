@@ -101,7 +101,7 @@ compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_colname
   alpha <- theta[(pcovs + 1):length(theta)]
 
   # Pre-calculate the linear predictor for Z (excluding X)
-  xcol_idx <- which(colnames(Xmat_s0) == x_colname)
+  xcol_idx <- which(colnames(Xmat_s0) %in% x_colname)
   beta_Z <- beta[-xcol_idx]
   Zmat_s0 <- Xmat_s0[, -xcol_idx, drop = FALSE]
   # Constant part of mu for each subject: mu_fixed = Z %*% beta_z
@@ -334,7 +334,7 @@ compute_y1star_s0 <- function(theta1, y1vec_s0, Xmat_m1_s0, x_support, x_colname
   alpha <- theta1[(pcovs_m1+1):length(theta1)]
 
   # Pre-calculate the linear predictor for Z (excluding X)
-  xcol_idx <- which(colnames(Xmat_m1_s0) == x_colname)
+  xcol_idx <- which(colnames(Xmat_m1_s0) %in% x_colname)
   beta_Z <- beta[-xcol_idx]
   Zmat_m1_s0 <- Xmat_m1_s0[, -xcol_idx, drop = FALSE]
   # Constant part of mu for each subject: mu_fixed = Z %*% beta_z

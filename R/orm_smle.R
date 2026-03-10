@@ -21,7 +21,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (any(is.na(Bbasis))) {
     stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
   }
-  cols2check <- setdiff(all.vars(formula), x_name)
+  cols2check <- intersect(setdiff(all.vars(formula), x_name), colnames(data))
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
   if (any(na_counts > 0)) {
     missing_cols <- names(na_counts[na_counts > 0])
@@ -40,14 +40,47 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   # -- 1. Construct Data Matrices ----
   mf <- stats::model.frame(formula, data, na.action = na.pass)
   yvec <- as.numeric(stats::model.response(mf))
-  Xmat <- stats::model.matrix(formula, mf)[, -1, drop = FALSE]  # Remove intercept
+  Xmat_tmp <- stats::model.matrix(formula, mf)
+  Xmat_assign <- attr(Xmat_tmp, "assign")[-1]
+  Xmat <- Xmat_tmp[, -1, drop = FALSE]  # Remove intercept
   # Split by selection indicator S
   yvec_s1 <- yvec[n1_idx]; yvec_s0 <- yvec[n0_idx]
   Xmat_s1 <- Xmat[n1_idx, , drop = FALSE]; Xmat_s0 <- Xmat[n0_idx, , drop = FALSE]
   Bbasis_s1 <- Bbasis[n1_idx, , drop = FALSE]; Bbasis_s0 <- Bbasis[n0_idx, , drop = FALSE]
-  # Support points for X: all unique values observed in Phase 2
-  x_name <- colnames(Xmat)[grepl(x_name, colnames(Xmat), fixed = TRUE)]
-  x_support <- unique(Xmat_s1[, x_name, drop = FALSE])
+
+  # Identify model matrix columns associated with x_name
+  terms_mat <- attr(terms(formula), "factors")
+  x_rowidx <- which(sapply(rownames(terms_mat), function(r) x_name %in% all.vars(parse(text = r))))
+  x_colidx <- which(terms_mat[x_rowidx, , drop = FALSE] > 0)
+  xonly_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) == 1]
+  xonly_colname <- colnames(Xmat)[Xmat_assign %in% xonly_colidx]
+
+  # Support points for X: unique raw values observed in Phase 2
+  x_raw_s1 <- data[[x_name]][n1_idx]
+  x_raw_unique <- sort(unique(x_raw_s1))
+
+  # Build x_support as model matrix columns for each unique raw X value
+  # Create a template data frame with one row per support point
+  template <- data[n1_idx[1], , drop = FALSE]
+  template_df <- template[rep(1, length(x_raw_unique)), , drop = FALSE]
+  template_df[[x_name]] <- x_raw_unique
+  mf_template <- stats::model.frame(formula, template_df, na.action = na.pass)
+  Xmat_template <- stats::model.matrix(formula, mf_template)[, -1, drop = FALSE]
+  x_support <- Xmat_template[, xonly_colname, drop = FALSE]
+
+  # Map each Phase 2 subject to their support point index
+  s1_raw_match <- match(x_raw_s1, x_raw_unique)
+
+  # Interaction term with X?
+  xinterz_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) > 1]
+  if (length(xinterz_colidx) > 0) {
+    xinterz_colname <- colnames(Xmat)[Xmat_assign %in% xinterz_colidx]
+    xinterz_z_rowidx <- setdiff(which(terms_mat[, xinterz_colidx] > 0), x_rowidx) - 1
+    if (length(xinterz_z_rowidx) > 1) {
+      stop("Higher-order interactions (e.g., X:Z1:Z2) are not supported. Only two-way interactions allowed.")
+    }
+    xinterz_z_colname <- colnames(Xmat)[Xmat_assign == xinterz_z_rowidx]
+  }
 
   # -- 2. Initialize Parameters ----
   # theta: (beta, cutpoints)
@@ -67,9 +100,11 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   }
 
   # p_vl: normalized sieve coefficients
-  s1_keys <- do.call(paste, as.data.frame(Xmat_s1[, x_name, drop = FALSE]))
-  support_keys <- do.call(paste, as.data.frame(x_support))
-  p_vl_num_init <- t(outer(s1_keys, support_keys, "==")) %*% Bbasis_s1  # (d, s_n)
+  # Use support point index matching (exact, not string-based)
+  d_size <- nrow(x_support)
+  indicator_mat <- matrix(0, nrow = length(n1_idx), ncol = d_size)
+  indicator_mat[cbind(seq_along(s1_raw_match), s1_raw_match)] <- 1
+  p_vl_num_init <- t(indicator_mat) %*% Bbasis_s1  # (d, s_n)
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
 
   # -- 3. EM Loop ----
@@ -79,12 +114,12 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
 
     ## -- E-STEP ----
     # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
-    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, x_name, family)  # (n0, d)
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, xonly_colname, family)  # (n0, d)
     w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
 
     # -- M-STEP ----
     # Update theta(m+1)
-    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_name, family)
+    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, xonly_colname, family)
     # Update p_vl(m+1)
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
@@ -96,7 +131,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   }
 
   if (!converged) {
-    warning("EM algorithm reached max_iter without converging to tolerance.")
+    message("EM algorithm reached max_iter without converging to tolerance.")
   }
 
   # -- 4. Standard Error Estimation ----
@@ -105,7 +140,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_name, family
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family
     )
     se <- se_results$se
     vcov <- se_results$vcov
