@@ -139,7 +139,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, maxiter, tol*1e-2
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, max_iter, tol*1e-2
     )
     se <- se_results$se
     vcov <- se_results$vcov
