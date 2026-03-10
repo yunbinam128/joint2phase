@@ -54,23 +54,6 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   x_colidx <- which(terms_mat[x_rowidx, , drop = FALSE] > 0)
   xonly_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) == 1]
   xonly_colname <- colnames(Xmat)[Xmat_assign %in% xonly_colidx]
-
-  # Support points for X: unique raw values observed in Phase 2
-  x_raw_s1 <- data[[x_name]][n1_idx]
-  x_raw_unique <- sort(unique(x_raw_s1))
-
-  # Build x_support as model matrix columns for each unique raw X value
-  # Create a template data frame with one row per support point
-  template <- data[n1_idx[1], , drop = FALSE]
-  template_df <- template[rep(1, length(x_raw_unique)), , drop = FALSE]
-  template_df[[x_name]] <- x_raw_unique
-  mf_template <- stats::model.frame(formula, template_df, na.action = na.pass)
-  Xmat_template <- stats::model.matrix(formula, mf_template)[, -1, drop = FALSE]
-  x_support <- Xmat_template[, xonly_colname, drop = FALSE]
-
-  # Map each Phase 2 subject to their support point index
-  s1_raw_match <- match(x_raw_s1, x_raw_unique)
-
   # Interaction term with X?
   xinterz_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) > 1]
   if (length(xinterz_colidx) > 0) {
@@ -81,6 +64,19 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     }
     xinterz_z_colname <- colnames(Xmat)[Xmat_assign == xinterz_z_rowidx]
   }
+
+  # Support points for X: unique raw values observed in Phase 2
+  x_raw_s1 <- data[[x_name]][n1_idx]
+  x_raw_unique <- sort(unique(x_raw_s1))
+  # Build x_support as model matrix columns for each unique raw X value
+  # Create a template data frame with one row per support point
+  template_df <- data[1:length(x_raw_unique), , drop = FALSE]
+  template_df[[x_name]] <- x_raw_unique
+  mf_template <- stats::model.frame(formula, template_df, na.action = na.pass)
+  Xmat_template <- stats::model.matrix(formula, mf_template)[, -1, drop = FALSE]
+  x_support <- Xmat_template[, xonly_colname, drop = FALSE]
+  # Map each Phase 2 subject to their support point index
+  s1_raw_match <- match(x_raw_s1, x_raw_unique)
 
   # -- 2. Initialize Parameters ----
   # theta: (beta, cutpoints)
@@ -131,8 +127,11 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   }
 
   if (!converged) {
-    message("EM algorithm reached max_iter without converging to tolerance.")
+    message(sprintf("EM algorithm reached max_iter without converging to tolerance. Current max(abs(theta_curr - theta_old)) = %.6f", max(abs(theta_curr - theta_old))))
   }
+
+  names(theta_curr)[1:ncol(Xmat)] <- colnames(Xmat)
+  names(theta_curr)[(ncol(Xmat) + 1):length(theta_curr)] <- paste0("alpha", 1:(length(theta_curr) - ncol(Xmat)))
 
   # -- 4. Standard Error Estimation ----
   se <- NULL
@@ -144,6 +143,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     )
     se <- se_results$se
     vcov <- se_results$vcov
+    names(se) <- rownames(vcov) <- colnames(vcov) <- names(theta_curr)
   }
 
   return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr, iterations = iter))
