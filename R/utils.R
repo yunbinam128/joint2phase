@@ -234,13 +234,40 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 # Estimate SE via profile likelihood
 # called by smle_probit()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol) {
-  # Define the function to differentiate
-  obj_func <- function(t) {
-    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol)
+  # For SE: use fewer inner EM iterations since perturbations are small
+  # and p_vl is warm-started from the converged value
+  se_max_iter <- min(max_iter, 50)
+  se_tol <- max(tol, 1e-6)
+
+  pll_func <- function(t) {
+    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, se_max_iter, se_tol)
   }
 
-  # Calculate Hessian numerically
-  hess <- numDeriv::hessian(func = obj_func, x = theta)
+  # Second-order forward-difference Hessian (faster than numDeriv Richardson extrapolation)
+  n <- length(yvec_s1) + length(yvec_s0)
+  nparams <- length(theta)
+  hn <- n^(-1/2)
+  e_mat <- diag(hn, nparams)
+
+  pl_0d <- pll_func(theta)
+  pl_1d <- numeric(nparams)
+  for (i in seq_len(nparams)) {
+    pl_1d[i] <- pll_func(theta + e_mat[i, ])
+  }
+  pl_2d <- matrix(NA, nparams, nparams)
+  for (i in seq_len(nparams)) {
+    for (j in i:nparams) {
+      pl_2d[i, j] <- pl_2d[j, i] <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
+    }
+  }
+
+  # H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2
+  hess <- matrix(NA, nparams, nparams)
+  for (i in seq_len(nparams)) {
+    for (j in i:nparams) {
+      hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
+    }
+  }
 
   # Estimate Covariance and SE
   vcov_mat <- try(solve(-hess), silent = TRUE)
@@ -262,12 +289,13 @@ smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xma
   # EM Loop: Update only p_vl
   p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
 
-  return(smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family))
+  # Pass pre-computed prob_y_given_xv_s0 to avoid redundant computation
+  return(smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0))
 }
 
 # Calculate log-likelihood at fixed theta, p_vl
 # called by estimate_se_smle()
-smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family) {
+smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0 = NULL) {
   # For S=1, we need P(Y|X,Z)
   pcovs <- ncol(Xmat_s1)
   beta <- theta[1:pcovs]
@@ -282,7 +310,9 @@ smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbas
   prob_s1 <- pmax(1e-16, F_link(alpha_ext[yvec_s1 + 1] - mu_s1) - F_link(alpha_ext[yvec_s1] - mu_s1))
 
   # For S=0, we need P(Y|Z) = sum_v sum_l P(Y|x_v, Z) * B_l(Z) * p_vl
-  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
+  if (is.null(prob_y_given_xv_s0)) {
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
+  }
   prob_xv_s0 <- Bbasis_s0 %*% t(p_vl)
   prob_s0 <- pmax(1e-16, rowSums(prob_y_given_xv_s0 * prob_xv_s0))
 

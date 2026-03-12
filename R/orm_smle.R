@@ -68,6 +68,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   # Support points for X: unique raw values observed in Phase 2
   x_raw_s1 <- data[[x_name]][n1_idx]
   x_raw_unique <- sort(unique(x_raw_s1))
+  # Map each Phase 2 subject to their support point index
+  s1_raw_match <- match(x_raw_s1, x_raw_unique)
   # Build x_support as model matrix columns for each unique raw X value
   # Create a template data frame with one row per support point
   template_df <- data[1:length(x_raw_unique), , drop = FALSE]
@@ -75,8 +77,6 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   mf_template <- stats::model.frame(formula, template_df, na.action = na.pass)
   Xmat_template <- stats::model.matrix(formula, mf_template)[, -1, drop = FALSE]
   x_support <- Xmat_template[, xonly_colname, drop = FALSE]
-  # Map each Phase 2 subject to their support point index
-  s1_raw_match <- match(x_raw_s1, x_raw_unique)
 
   # -- 2. Initialize Parameters ----
   # theta: (beta, cutpoints)
