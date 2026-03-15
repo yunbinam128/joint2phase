@@ -7,14 +7,17 @@
 #' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
 #' @param theta_init Optional initial vector for theta (beta, cutpoints).
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
+#' @param se_method Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
-                     theta_init = NULL, se_calc = TRUE, max_iter = 500, tol = 1e-6) {
+                     theta_init = NULL, se_calc = TRUE, se_method = "forward",
+                     max_iter = 500, tol = 1e-6) {
   # -- 0. Validate ----
+  se_method <- match.arg(se_method, c("forward", "numDeriv"))
   if (!(family %in% c("probit", "logistic"))) {
     stop("The 'family' must be \"probit\" or \"logistic\".")
   }
@@ -139,7 +142,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, max_iter, tol*1e-2
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, max_iter, tol,
+      method = se_method
     )
     se <- se_results$se
     vcov <- se_results$vcov

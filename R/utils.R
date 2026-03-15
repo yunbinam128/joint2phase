@@ -233,39 +233,40 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 ## -- SE Estimation ----
 # Estimate SE via profile likelihood
 # called by smle_probit()
-estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol) {
+estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward") {
   # For SE: use fewer inner EM iterations since perturbations are small
   # and p_vl is warm-started from the converged value
-  se_max_iter <- min(max_iter, 50)
-  se_tol <- max(tol, 1e-6)
-
   pll_func <- function(t) {
-    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, se_max_iter, se_tol)
+    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol)
   }
 
-  # Second-order forward-difference Hessian (faster than numDeriv Richardson extrapolation)
-  n <- length(yvec_s1) + length(yvec_s0)
-  nparams <- length(theta)
-  hn <- n^(-1/2)
-  e_mat <- diag(hn, nparams)
+  if (method == "numDeriv") {
+    hess <- numDeriv::hessian(pll_func, theta)
+  } else {
+    # Second-order forward-difference Hessian (faster than numDeriv Richardson extrapolation)
+    n <- length(yvec_s1) + length(yvec_s0)
+    nparams <- length(theta)
+    hn <- n^(-1/2)
+    e_mat <- diag(hn, nparams)
 
-  pl_0d <- pll_func(theta)
-  pl_1d <- numeric(nparams)
-  for (i in seq_len(nparams)) {
-    pl_1d[i] <- pll_func(theta + e_mat[i, ])
-  }
-  pl_2d <- matrix(NA, nparams, nparams)
-  for (i in seq_len(nparams)) {
-    for (j in i:nparams) {
-      pl_2d[i, j] <- pl_2d[j, i] <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
+    pl_0d <- pll_func(theta)
+    pl_1d <- numeric(nparams)
+    for (i in seq_len(nparams)) {
+      pl_1d[i] <- pll_func(theta + e_mat[i, ])
     }
-  }
+    pl_2d <- matrix(NA, nparams, nparams)
+    for (i in seq_len(nparams)) {
+      for (j in i:nparams) {
+        pl_2d[i, j] <- pl_2d[j, i] <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
+      }
+    }
 
-  # H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2
-  hess <- matrix(NA, nparams, nparams)
-  for (i in seq_len(nparams)) {
-    for (j in i:nparams) {
-      hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
+    # H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2
+    hess <- matrix(NA, nparams, nparams)
+    for (i in seq_len(nparams)) {
+      for (j in i:nparams) {
+        hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
+      }
     }
   }
 
