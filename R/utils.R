@@ -95,22 +95,39 @@ acml_probit_grad <- function(theta, yvec, Xmat, pi_perY, family) {
 ## -- SMLE Helpers ----
 # Compute P(Y_i | x_v, Z_i; theta) for S=0 across x_v in x_support
 # called by smle_probit(), em_joint()
-compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_colname, family = "probit") {
+compute_py_given_xv_s0 <- function(theta, yvec_s0, Xmat_s0, x_support, x_colname, family = "probit",
+                                   x_inter_colname = NULL, z_inter_colname = NULL) {
   pcovs <- ncol(Xmat_s0)
   beta <- theta[1:pcovs]
   alpha <- theta[(pcovs + 1):length(theta)]
 
-  # Pre-calculate the linear predictor for Z (excluding X)
-  xcol_idx <- which(colnames(Xmat_s0) %in% x_colname)
-  beta_Z <- beta[-xcol_idx]
-  Zmat_s0 <- Xmat_s0[, -xcol_idx, drop = FALSE]
+  # Pre-calculate the linear predictor for Z (excluding all X-dependent columns)
+  all_xcol_idx <- which(colnames(Xmat_s0) %in% c(x_colname, x_inter_colname))
+  beta_Z <- beta[-all_xcol_idx]
+  Zmat_s0 <- Xmat_s0[, -all_xcol_idx, drop = FALSE]
   # Constant part of mu for each subject: mu_fixed = Z %*% beta_z
   mu_fixed <- as.vector(Zmat_s0 %*% beta_Z)
 
   # Vectorized calculation of mu for all support points v
-  # mu_iv = mu_fixed_i + beta_x * x_v
+  # Main X effect: mu_iv += x_support[v,] %*% beta_x_main
+  xcol_idx <- which(colnames(Xmat_s0) %in% x_colname)
   beta_x <- beta[xcol_idx]
   mu_mat <- outer(mu_fixed, as.vector(x_support %*% beta_x), "+")  # (n0, d_size)
+
+  # Interaction contribution: mu_iv += Z_inter[i,] . (x_support[v,] %*% beta_inter reshaped)
+  if (length(x_inter_colname) > 0) {
+    inter_idx <- which(colnames(Xmat_s0) %in% x_inter_colname)
+    beta_inter <- beta[inter_idx]
+    Z_inter <- Xmat_s0[, z_inter_colname, drop = FALSE]  # (n0, n_z)
+    n_x <- ncol(x_support)
+    n_z <- ncol(Z_inter)
+    # R model.matrix orders interaction columns with X varying fastest within Z
+    beta_inter_mat <- matrix(beta_inter, nrow = n_x, ncol = n_z, byrow = FALSE)
+    # C[v, j] = x_support[v,] %*% beta_inter_mat[, j]; C is (d_size, n_z)
+    # inter_contrib[i, v] = Z_inter[i,] . C[v,] = Z_inter %*% t(C)
+    C <- x_support %*% beta_inter_mat  # (d_size, n_z)
+    mu_mat <- mu_mat + Z_inter %*% t(C)  # (n0, d_size)
+  }
 
   # Calculate ordered probit probabilities for all i, v simultaneously
   alpha_ext <- c(-Inf, alpha, Inf)
@@ -140,7 +157,8 @@ compute_w_iv_s0 <- function(prob_y_given_xv_s0, p_vl, Bbasis_s0) {
 ## -- M-Step in EM Algorithm ----
 # Update theta in M-step
 # called by smle_probit()
-update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_colname, family) {
+update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, x_colname, family,
+                              x_inter_colname = NULL, z_inter_colname = NULL) {
   n1 <- length(yvec_s1)
   n0 <- length(yvec_s0)
   d_size <- nrow(x_support)
@@ -153,6 +171,18 @@ update_theta_smle <- function(theta, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x
 
   Xmat_s0_long <- Xmat_s0[rep(1:n0, each = d_size), , drop = FALSE]
   Xmat_s0_long[, x_colname] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
+
+  # Fill in interaction columns: each is the product of corresponding X main and Z columns
+  if (length(x_inter_colname) > 0) {
+    n_x <- length(x_colname)
+    n_z <- length(z_inter_colname)
+    for (j in seq_len(n_z)) {
+      for (k in seq_len(n_x)) {
+        inter_col <- x_inter_colname[(j - 1) * n_x + k]
+        Xmat_s0_long[, inter_col] <- Xmat_s0_long[, x_colname[k]] * Xmat_s0_long[, z_inter_colname[j]]
+      }
+    }
+  }
 
   # Combine S=1 and S=0
   yvec_full <- c(yvec_s1, yvec_s0_long)
@@ -233,11 +263,13 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 ## -- SE Estimation ----
 # Estimate SE via profile likelihood
 # called by smle_probit()
-estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward") {
+estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
+                             x_inter_colname = NULL, z_inter_colname = NULL) {
   # For SE: use fewer inner EM iterations since perturbations are small
   # and p_vl is warm-started from the converged value
   pll_func <- function(t) {
-    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol)
+    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol,
+                    x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
   }
 
   if (method == "numDeriv") {
@@ -283,9 +315,11 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
 # Profile log-likelihood
 # called by estimate_se_smle()
 smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
-                            x_support, x_colname, family, max_iter, tol) {
+                            x_support, x_colname, family, max_iter, tol,
+                            x_inter_colname = NULL, z_inter_colname = NULL) {
   # Pre-compute prob_y0_v for FIXED theta
-  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
+  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family,
+                                                x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
 
   # EM Loop: Update only p_vl
   p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
@@ -296,7 +330,8 @@ smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xma
 
 # Calculate log-likelihood at fixed theta, p_vl
 # called by estimate_se_smle()
-smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0 = NULL) {
+smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0 = NULL,
+                           x_inter_colname = NULL, z_inter_colname = NULL) {
   # For S=1, we need P(Y|X,Z)
   pcovs <- ncol(Xmat_s1)
   beta <- theta[1:pcovs]
@@ -312,7 +347,8 @@ smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbas
 
   # For S=0, we need P(Y|Z) = sum_v sum_l P(Y|x_v, Z) * B_l(Z) * p_vl
   if (is.null(prob_y_given_xv_s0)) {
-    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family)
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family,
+                                                  x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
   }
   prob_xv_s0 <- Bbasis_s0 %*% t(p_vl)
   prob_s0 <- pmax(1e-16, rowSums(prob_y_given_xv_s0 * prob_xv_s0))

@@ -8,6 +8,7 @@
 #' @param theta_init Optional initial vector for theta (beta, cutpoints).
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
 #' @param se_method Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.
+#' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer.
 #'
@@ -15,7 +16,7 @@
 #' @export
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
                      theta_init = NULL, se_calc = TRUE, se_method = "forward",
-                     max_iter = 500, tol = 1e-6) {
+                     verbose = FALSE, max_iter = 500, tol = 1e-6) {
   # -- 0. Validate ----
   se_method <- match.arg(se_method, c("forward", "numDeriv"))
   if (!(family %in% c("probit", "logistic"))) {
@@ -58,6 +59,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   xonly_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) == 1]
   xonly_colname <- colnames(Xmat)[Xmat_assign %in% xonly_colidx]
   # Interaction term with X?
+  xinterz_colname <- character(0)
+  xinterz_z_colname <- character(0)
   xinterz_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) > 1]
   if (length(xinterz_colidx) > 0) {
     xinterz_colname <- colnames(Xmat)[Xmat_assign %in% xinterz_colidx]
@@ -113,12 +116,14 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
 
     ## -- E-STEP ----
     # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
-    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, xonly_colname, family)  # (n0, d)
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, xonly_colname, family,
+                                                   x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)  # (n0, d)
     w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
 
     # -- M-STEP ----
     # Update theta(m+1)
-    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, xonly_colname, family)
+    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, xonly_colname, family,
+                                    x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)
     # Update p_vl(m+1)
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
@@ -132,6 +137,13 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (!converged) {
     message(sprintf("EM algorithm reached max_iter without converging to tolerance. Current max(abs(theta_curr - theta_old)) = %.6f", max(abs(theta_curr - theta_old))))
   }
+  if (verbose) {
+    if (converged) {
+      cat(sprintf("EM converged at iter = %d (tol = %g)\n", iter, tol))
+    } else {
+      cat(sprintf("EM did NOT converge after %d iterations (tol = %g, current max diff = %g)\n", max_iter, tol, max(abs(theta_curr - theta_old))))
+    }
+  }
 
   names(theta_curr)[1:ncol(Xmat)] <- colnames(Xmat)
   names(theta_curr)[(ncol(Xmat) + 1):length(theta_curr)] <- paste0("alpha", 1:(length(theta_curr) - ncol(Xmat)))
@@ -142,8 +154,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, max_iter, tol,
-      method = se_method
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, max_iter, tol * 1e-2,
+      method = se_method, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
     )
     se <- se_results$se
     vcov <- se_results$vcov
