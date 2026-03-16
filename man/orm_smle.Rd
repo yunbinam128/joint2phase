@@ -12,11 +12,11 @@ orm_smle(
   family = "probit",
   theta_init = NULL,
   se_calc = TRUE,
-  se_method = "numDeriv",
+  se_method = "forward",
   verbose = TRUE,
   max_iter = 500,
   tol = 1e-06,
-  se_max_iter = 100,
+  se_max_iter = 1000,
   se_tol = 1e-08
 )
 }
@@ -35,13 +35,17 @@ orm_smle(
 
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
-\item{se_method}{Character value specifying the method for SE estimation: "forward" uses central-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.}
+\item{se_method}{Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}.}
 
 \item{verbose}{Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.}
 
 \item{max_iter}{Maximum number of EM iterations. Defaults to 500.}
 
-\item{tol}{Convergence tolerance for the optimizer.}
+\item{tol}{Convergence tolerance for the optimizer. Defaults to 1e-6.}
+
+\item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
+
+\item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
 }
 \value{
 A list containing estimates and convergence info.
