@@ -10,6 +10,8 @@ NumericMatrix update_p_vl_cpp(NumericMatrix prob_y0_v, NumericMatrix B0,
   int s_n = B0.ncol();
 
   NumericMatrix p_vl = clone(p_vl_curr);
+  int final_iter = max_iter;
+  double final_diff = 0.0;
 
   for (int iter = 0; iter < max_iter; iter++) {
     NumericMatrix p_vl_old = clone(p_vl);
@@ -52,7 +54,14 @@ NumericMatrix update_p_vl_cpp(NumericMatrix prob_y0_v, NumericMatrix B0,
     for (int j = 0; j < p_vl.length(); j++) {
       max_diff = std::max(max_diff, std::abs(p_vl[j] - p_vl_old[j]));
     }
-    if (max_diff < tol) break;
+    final_diff = max_diff;
+    if (max_diff < tol) {
+      final_iter = iter + 1;
+      break;
+    }
   }
+
+  p_vl.attr("iterations") = final_iter;
+  p_vl.attr("max_diff") = final_diff;
   return p_vl;
 }

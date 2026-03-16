@@ -7,7 +7,7 @@
 #' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
 #' @param theta_init Optional initial vector for theta (beta, cutpoints).
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
-#' @param se_method Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.
+#' @param se_method Character value specifying the method for SE estimation: "forward" uses central-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.
 #' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer.
@@ -15,8 +15,9 @@
 #' @return A list containing estimates and convergence info.
 #' @export
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
-                     theta_init = NULL, se_calc = TRUE, se_method = "forward",
-                     verbose = FALSE, max_iter = 500, tol = 1e-6) {
+                     theta_init = NULL, se_calc = TRUE, se_method = "numDeriv",
+                     verbose = TRUE, max_iter = 500, tol = 1e-6,
+                     se_max_iter = 100, se_tol = 1e-8) {
   # -- 0. Validate ----
   se_method <- match.arg(se_method, c("forward", "numDeriv"))
   if (!(family %in% c("probit", "logistic"))) {
@@ -64,7 +65,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   xinterz_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) > 1]
   if (length(xinterz_colidx) > 0) {
     xinterz_colname <- colnames(Xmat)[Xmat_assign %in% xinterz_colidx]
-    xinterz_z_rowidx <- setdiff(which(terms_mat[, xinterz_colidx] > 0), x_rowidx) - 1
+    xinterz_z_rowidx <- setdiff(which(terms_mat[, xinterz_colidx] > 0), x_rowidx)
     if (length(xinterz_z_rowidx) > 1) {
       stop("Higher-order interactions (e.g., X:Z1:Z2) are not supported. Only two-way interactions allowed.")
     }
@@ -154,8 +155,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, max_iter, tol * 1e-2,
-      method = se_method, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, se_max_iter, se_tol,
+      method = se_method, verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
     )
     se <- se_results$se
     vcov <- se_results$vcov

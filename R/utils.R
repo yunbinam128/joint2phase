@@ -264,42 +264,58 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 # Estimate SE via profile likelihood
 # called by smle_probit()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
-                             x_inter_colname = NULL, z_inter_colname = NULL) {
+                             verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
   # For SE: use fewer inner EM iterations since perturbations are small
   # and p_vl is warm-started from the converged value
+  se_pll_max_iters <- integer(0)
   pll_func <- function(t) {
-    smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol,
-                    x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
+    result <- smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol,
+                              x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
+    se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
+    result
   }
 
   if (method == "numDeriv") {
     hess <- numDeriv::hessian(pll_func, theta)
   } else {
-    # Second-order forward-difference Hessian (faster than numDeriv Richardson extrapolation)
+    # Central-difference Hessian (O(h^2) bias, more accurate than forward-difference)
     n <- length(yvec_s1) + length(yvec_s0)
     nparams <- length(theta)
     hn <- n^(-1/2)
     e_mat <- diag(hn, nparams)
 
+    # Diagonal: H[i,i] = (f(x+h*ei) - 2*f(x) + f(x-h*ei)) / h^2
+    # Off-diag: H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei-h*ej) - f(x-h*ei+h*ej) + f(x-h*ei-h*ej)) / (4*h^2)
     pl_0d <- pll_func(theta)
-    pl_1d <- numeric(nparams)
+    pl_plus <- numeric(nparams)
+    pl_minus <- numeric(nparams)
     for (i in seq_len(nparams)) {
-      pl_1d[i] <- pll_func(theta + e_mat[i, ])
-    }
-    pl_2d <- matrix(NA, nparams, nparams)
-    for (i in seq_len(nparams)) {
-      for (j in i:nparams) {
-        pl_2d[i, j] <- pl_2d[j, i] <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
-      }
+      pl_plus[i] <- pll_func(theta + e_mat[i, ])
+      pl_minus[i] <- pll_func(theta - e_mat[i, ])
     }
 
-    # H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2
     hess <- matrix(NA, nparams, nparams)
+    # Diagonal entries
     for (i in seq_len(nparams)) {
-      for (j in i:nparams) {
-        hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
+      hess[i, i] <- (pl_plus[i] - 2 * pl_0d + pl_minus[i]) / (hn^2)
+    }
+    # Off-diagonal entries
+    for (i in seq_len(nparams - 1)) {
+      for (j in (i + 1):nparams) {
+        pp <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
+        pm <- pll_func(theta + e_mat[i, ] - e_mat[j, ])
+        mp <- pll_func(theta - e_mat[i, ] + e_mat[j, ])
+        mm <- pll_func(theta - e_mat[i, ] - e_mat[j, ])
+        hess[i, j] <- hess[j, i] <- (pp - pm - mp + mm) / (4 * hn^2)
       }
     }
+  }
+
+  if (verbose && length(se_pll_max_iters) > 0) {
+    n_evals <- length(se_pll_max_iters)
+    n_hit_max <- sum(se_pll_max_iters >= max_iter)
+    cat(sprintf("SE: %d PLL evaluations, inner p_vl EM used %d-%d iters (max_iter = %d, %d hit max)\n",
+                n_evals, min(se_pll_max_iters), max(se_pll_max_iters), max_iter, n_hit_max))
   }
 
   # Estimate Covariance and SE
@@ -325,7 +341,9 @@ smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xma
   p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
 
   # Pass pre-computed prob_y_given_xv_s0 to avoid redundant computation
-  return(smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0))
+  ll <- smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0)
+  attr(ll, "pll_inner_iter") <- as.integer(attr(p_vl_opt, "iterations"))
+  return(ll)
 }
 
 # Calculate log-likelihood at fixed theta, p_vl
