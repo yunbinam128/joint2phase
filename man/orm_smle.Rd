@@ -12,8 +12,12 @@ orm_smle(
   family = "probit",
   theta_init = NULL,
   se_calc = TRUE,
+  se_method = "numDeriv",
+  verbose = TRUE,
   max_iter = 500,
-  tol = 1e-06
+  tol = 1e-06,
+  se_max_iter = 100,
+  se_tol = 1e-08
 )
 }
 \arguments{
@@ -30,6 +34,10 @@ orm_smle(
 \item{theta_init}{Optional initial vector for theta (beta, cutpoints).}
 
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
+
+\item{se_method}{Character value specifying the method for SE estimation: "forward" uses central-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.}
+
+\item{verbose}{Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.}
 
 \item{max_iter}{Maximum number of EM iterations. Defaults to 500.}
 
