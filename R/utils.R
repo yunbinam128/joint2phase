@@ -279,34 +279,37 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
     hess <- numDeriv::hessian(pll_func, theta)
   } else {
     # Central-difference Hessian (O(h^2) bias, more accurate than forward-difference)
-    n <- length(yvec_s1) + length(yvec_s0)
     nparams <- length(theta)
-    hn <- n^(-1/2)
-    e_mat <- diag(hn, nparams)
+    eps <- 1e-4
+    h_vec <- eps * pmax(1, abs(theta))
 
-    # Diagonal: H[i,i] = (f(x+h*ei) - 2*f(x) + f(x-h*ei)) / h^2
-    # Off-diag: H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei-h*ej) - f(x-h*ei+h*ej) + f(x-h*ei-h*ej)) / (4*h^2)
+    # Diagonal: H[i,i] = (f(x+h_i*ei) - 2*f(x) + f(x-h_i*ei)) / h_i^2
+    # Off-diag: H[i,j] = (f(x+h_i*ei+h_j*ej) - f(x+h_i*ei-h_j*ej)
+    #                    - f(x-h_i*ei+h_j*ej) + f(x-h_i*ei-h_j*ej)) / (4*h_i*h_j)
     pl_0d <- pll_func(theta)
     pl_plus <- numeric(nparams)
     pl_minus <- numeric(nparams)
     for (i in seq_len(nparams)) {
-      pl_plus[i] <- pll_func(theta + e_mat[i, ])
-      pl_minus[i] <- pll_func(theta - e_mat[i, ])
+      ei <- rep(0, nparams); ei[i] <- h_vec[i]
+      pl_plus[i] <- pll_func(theta + ei)
+      pl_minus[i] <- pll_func(theta - ei)
     }
 
     hess <- matrix(NA, nparams, nparams)
     # Diagonal entries
     for (i in seq_len(nparams)) {
-      hess[i, i] <- (pl_plus[i] - 2 * pl_0d + pl_minus[i]) / (hn^2)
+      hess[i, i] <- (pl_plus[i] - 2 * pl_0d + pl_minus[i]) / (h_vec[i]^2)
     }
     # Off-diagonal entries
     for (i in seq_len(nparams - 1)) {
       for (j in (i + 1):nparams) {
-        pp <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
-        pm <- pll_func(theta + e_mat[i, ] - e_mat[j, ])
-        mp <- pll_func(theta - e_mat[i, ] + e_mat[j, ])
-        mm <- pll_func(theta - e_mat[i, ] - e_mat[j, ])
-        hess[i, j] <- hess[j, i] <- (pp - pm - mp + mm) / (4 * hn^2)
+        ei <- rep(0, nparams); ei[i] <- h_vec[i]
+        ej <- rep(0, nparams); ej[j] <- h_vec[j]
+        pp <- pll_func(theta + ei + ej)
+        pm <- pll_func(theta + ei - ej)
+        mp <- pll_func(theta - ei + ej)
+        mm <- pll_func(theta - ei - ej)
+        hess[i, j] <- hess[j, i] <- (pp - pm - mp + mm) / (4 * h_vec[i] * h_vec[j])
       }
     }
   }
