@@ -265,12 +265,11 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 # called by smle_probit()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
                              verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
-  # For SE: use fewer inner EM iterations since perturbations are small
-  # and p_vl is warm-started from the converged value
   se_pll_max_iters <- integer(0)
   pll_func <- function(t) {
-    result <- smle_probit_pll(theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol,
-                              x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
+    result <- smle_probit_pll(
+      theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+      x_support, x_colname, family, max_iter, tol, x_inter_colname, z_inter_colname)
     se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
     result
   }
@@ -278,38 +277,29 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
   if (method == "numDeriv") {
     hess <- numDeriv::hessian(pll_func, theta)
   } else {
-    # Central-difference Hessian (O(h^2) bias, more accurate than forward-difference)
+    # Second-order forward-difference Hessian (faster than numDeriv)
     nparams <- length(theta)
-    eps <- 1e-4
-    h_vec <- eps * pmax(1, abs(theta))
+    n <- length(yvec_s1) + length(yvec_s0)
+    hn <- n^(-1/2)
+    e_mat <- diag(hn, nparams)
 
-    # Diagonal: H[i,i] = (f(x+h_i*ei) - 2*f(x) + f(x-h_i*ei)) / h_i^2
-    # Off-diag: H[i,j] = (f(x+h_i*ei+h_j*ej) - f(x+h_i*ei-h_j*ej)
-    #                    - f(x-h_i*ei+h_j*ej) + f(x-h_i*ei-h_j*ej)) / (4*h_i*h_j)
     pl_0d <- pll_func(theta)
-    pl_plus <- numeric(nparams)
-    pl_minus <- numeric(nparams)
+    pl_1d <- numeric(nparams)
     for (i in seq_len(nparams)) {
-      ei <- rep(0, nparams); ei[i] <- h_vec[i]
-      pl_plus[i] <- pll_func(theta + ei)
-      pl_minus[i] <- pll_func(theta - ei)
+      pl_1d[i] <- pll_func(theta + e_mat[i, ])
+    }
+    pl_2d <- matrix(NA, nparams, nparams)
+    for (i in seq_len(nparams)) {
+      for (j in i:nparams) {
+        pl_2d[i, j] <- pl_2d[j, i] <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
+      }
     }
 
+    # H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2
     hess <- matrix(NA, nparams, nparams)
-    # Diagonal entries
     for (i in seq_len(nparams)) {
-      hess[i, i] <- (pl_plus[i] - 2 * pl_0d + pl_minus[i]) / (h_vec[i]^2)
-    }
-    # Off-diagonal entries
-    for (i in seq_len(nparams - 1)) {
-      for (j in (i + 1):nparams) {
-        ei <- rep(0, nparams); ei[i] <- h_vec[i]
-        ej <- rep(0, nparams); ej[j] <- h_vec[j]
-        pp <- pll_func(theta + ei + ej)
-        pm <- pll_func(theta + ei - ej)
-        mp <- pll_func(theta - ei + ej)
-        mm <- pll_func(theta - ei - ej)
-        hess[i, j] <- hess[j, i] <- (pp - pm - mp + mm) / (4 * h_vec[i] * h_vec[j])
+      for (j in i:nparams) {
+        hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
       }
     }
   }

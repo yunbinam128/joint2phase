@@ -7,17 +7,19 @@
 #' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
 #' @param theta_init Optional initial vector for theta (beta, cutpoints).
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
-#' @param se_method Character value specifying the method for SE estimation: "forward" uses central-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}, which is more accurate but slower.
+#' @param se_method Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}.
 #' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
-#' @param tol Convergence tolerance for the optimizer.
+#' @param tol Convergence tolerance for the optimizer. Defaults to 1e-6.
+#' @param se_max_iter Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.
+#' @param se_tol Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
-                     theta_init = NULL, se_calc = TRUE, se_method = "numDeriv",
+                     theta_init = NULL, se_calc = TRUE, se_method = "forward",
                      verbose = TRUE, max_iter = 500, tol = 1e-6,
-                     se_max_iter = 100, se_tol = 1e-8) {
+                     se_max_iter = 1000, se_tol = 1e-8) {
   # -- 0. Validate ----
   se_method <- match.arg(se_method, c("forward", "numDeriv"))
   if (!(family %in% c("probit", "logistic"))) {
@@ -114,11 +116,12 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   converged <- FALSE
   for (iter in 1:max_iter) {
     theta_old <- theta_curr
+    p_vl_old <- p_vl_curr
 
     ## -- E-STEP ----
     # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
     prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, xonly_colname, family,
-                                                   x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)  # (n0, d)
+                                                 x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)  # (n0, d)
     w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
 
     # -- M-STEP ----
@@ -129,21 +132,19 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
     # Check convergence
-    if (max(abs(theta_curr - theta_old)) < tol) {
+    if (max(abs(c(theta_curr, p_vl_curr) - c(theta_old, p_vl_old))) < tol) {
       converged <- TRUE
       break
     }
   }
 
   if (!converged) {
-    message(sprintf("EM algorithm reached max_iter without converging to tolerance. Current max(abs(theta_curr - theta_old)) = %.6f", max(abs(theta_curr - theta_old))))
+    message(sprintf("EM algorithm reached max_iter without converging to tolerance.\n
+                    Current max(abs(theta_curr - theta_old)) = %.6f\n
+                    Current max(abs(p_vl_curr - p_vl_old)) = %.6f", max(abs(theta_curr - theta_old)), max(abs(p_vl_curr - p_vl_old))))
   }
-  if (verbose) {
-    if (converged) {
-      cat(sprintf("EM converged at iter = %d (tol = %g)\n", iter, tol))
-    } else {
-      cat(sprintf("EM did NOT converge after %d iterations (tol = %g, current max diff = %g)\n", max_iter, tol, max(abs(theta_curr - theta_old))))
-    }
+  if (verbose && converged) {
+    cat(sprintf("EM converged at iter = %d (tol = %g)\n", iter, tol))
   }
 
   names(theta_curr)[1:ncol(Xmat)] <- colnames(Xmat)
