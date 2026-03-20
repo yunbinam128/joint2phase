@@ -133,7 +133,6 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
 
     # Check convergence
     if (max(abs(theta_curr - theta_old)) < tol) {
-    # if (max(abs(c(theta_curr, p_vl_curr) - c(theta_old, p_vl_old))) < tol) {
       converged <- TRUE
       break
     }
@@ -141,8 +140,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
 
   if (!converged) {
     message(sprintf("EM algorithm reached max_iter without converging to tolerance.\n
-                    Current max(abs(theta_curr - theta_old)) = %.6f\n
-                    Current max(abs(p_vl_curr - p_vl_old)) = %.6f", max(abs(theta_curr - theta_old)), max(abs(p_vl_curr - p_vl_old))))
+                    Current max(abs(theta_curr - theta_old)) = %.6f\n", max(abs(theta_curr - theta_old))))
   }
   if (verbose && converged) {
     cat(sprintf("EM converged at iter = %d (tol = %g)\n", iter, tol))
