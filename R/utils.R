@@ -318,7 +318,7 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
     return(list(se = rep(NA, length(theta)), vcov = NULL))
   }
 
-  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat))
+  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, se_max_iterations = max(se_pll_max_iters)))
 }
 
 # Profile log-likelihood

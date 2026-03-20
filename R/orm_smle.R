@@ -152,6 +152,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   # -- 4. Standard Error Estimation ----
   se <- NULL
   vcov <- NULL
+  se_max_iterations <- NULL
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
@@ -160,8 +161,9 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     )
     se <- se_results$se
     vcov <- se_results$vcov
+    se_max_iterations <- se_results$se_max_iterations
     names(se) <- rownames(vcov) <- colnames(vcov) <- names(theta_curr)
   }
 
-  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr, iterations = iter))
+  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr, iterations = iter, se_max_iterations = se_max_iterations))
 }
