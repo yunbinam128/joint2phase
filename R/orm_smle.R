@@ -132,7 +132,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
     # Check convergence
-    if (max(abs(c(theta_curr, p_vl_curr) - c(theta_old, p_vl_old))) < tol) {
+    if (max(abs(theta_curr - theta_old)) < tol) {
+    # if (max(abs(c(theta_curr, p_vl_curr) - c(theta_old, p_vl_old))) < tol) {
       converged <- TRUE
       break
     }
