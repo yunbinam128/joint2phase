@@ -100,8 +100,15 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     }
   }
   if (use_defaults) {
-    fit_init <- MASS::polr(formula, data, method = family)
-    theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
+    fit_init <- tryCatch(
+      MASS::polr(formula, data, method = family),
+      error = function(e) NULL
+    )
+    if (!is.null(fit_init)) {
+      theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
+    } else {
+      theta_curr <- c(rep(1, ncol(Xmat_tmp) - 1), 1:(length(unique(yvec)) - 1))
+    }
   }
 
   # p_vl: normalized sieve coefficients
