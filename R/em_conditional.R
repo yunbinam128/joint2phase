@@ -96,6 +96,7 @@ em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = 
   }
   sigma12_curr <- theta2_curr[pcovs_m2 + 1]
   sigma22_curr <- theta2_curr[pcovs_m2 + 2]
+  names(gamma_curr) <- colnames(Xmat_m2)
 
   if (!converged) {
     warning("EM algorithm reached max_iter without converging to tolerance.")
@@ -108,8 +109,9 @@ em_conditional <- function(formula, data, formula_cond, theta_cond, vcov_cond = 
     se_results <- estimate_se_em_cond(
       theta2 = theta2_curr, y2vec, Xmat_m2, theta_cond, vcov_cond, y1vec, Xmat_m1, mu1, pcovs_m1, alpha_ext
     )
-    se <- se_results$se
-    vcov <- se_results$vcov
+    se <- se_results$se[1:pcovs_m2]
+    vcov <- se_results$vcov[1:pcovs_m2, 1:pcovs_m2]
+    names(se) <- rownames(vcov) <- colnames(vcov) <- names(gamma_curr)
   }
 
   return(list(gamma = gamma_curr, sigma12 = sigma12_curr, sigma22 = sigma22_curr,
