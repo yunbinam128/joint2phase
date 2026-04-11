@@ -3,6 +3,7 @@
 export(em_conditional)
 export(em_joint)
 export(orm_acml)
+export(orm_mle0)
 export(orm_smle)
 importFrom(Rcpp,evalCpp)
 useDynLib(joint2phase, .registration = TRUE)
