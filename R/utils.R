@@ -1,5 +1,21 @@
 # -- Model 1 (ordinal + probit) Helpers ----
 ## -- ACML Helpers ----
+# Spread collapsed cutpoints for initialization.
+# When some Y levels are unobserved, polr collapses their cutpoints to nearly
+# identical values. In the log-spacing parameterization, this makes exp(gamma) ~ 0,
+# causing vanishing gradients. Fix: evenly space all cutpoints between the first
+# and last (which polr identifies correctly as boundaries of observed groups).
+# called by orm_acml2()
+spread_collapsed_cutpoints <- function(alpha) {
+  q <- length(alpha)
+  if (q <= 1) return(alpha)
+  # Check if any spacings are tiny relative to the total range
+  total_range <- alpha[q] - alpha[1]
+  min_spacing <- min(diff(alpha))
+  if (min_spacing > total_range / (10 * q)) return(alpha)  # Already well-spread
+  seq(alpha[1], alpha[q], length.out = q)
+}
+
 # Negative ascertainment-corrected log-likelihood
 # called by acml_probit()
 acml_probit_nll <- function(theta, yvec, Xmat, pi_perY, family) {
@@ -31,7 +47,7 @@ acml_probit_nll <- function(theta, yvec, Xmat, pi_perY, family) {
   # Numerator: Probability of the observed outcome
   yobs_idx <- as.numeric(yvec)
   p_yobs <- p_m[cbind(1:nrow(Xmat), yobs_idx)]
-  p_yobs[p_yobs < 1e-16] <- 1e-16  # Prevent exactly zero probabilities
+  p_yobs <- pmax(p_yobs, 1e-16)  # Prevent zero or negative probabilities
   # Denominator: Weighted sum of probabilities (Probability of selection)
   denom <- pmax(1e-16, as.vector(p_m %*% pi_perY))  # Numerical stability
 
@@ -365,6 +381,181 @@ smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbas
   prob_s0 <- pmax(1e-16, rowSums(prob_y_given_xv_s0 * prob_xv_s0))
 
   return(sum(log(prob_s1)) + sum(log(prob_s0)))
+}
+
+## -- MLE0 Helpers ----
+# Compute P(Y_i = y_i | support_j; theta) for all (i, j) combinations
+# called by orm_mle0()
+compute_py_given_support <- function(theta, yvec, support_mat, family) {
+  pcovs <- ncol(support_mat)
+  beta <- theta[1:pcovs]
+  alpha <- theta[(pcovs + 1):length(theta)]
+
+  mu_support <- as.vector(support_mat %*% beta)  # (m,)
+  alpha_ext <- c(-Inf, alpha, Inf)
+
+  if (family == "probit") {
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    F_link <- stats::plogis
+  }
+
+  # P(Y_i = y_i | support_j) = F(alpha_{y_i} - mu_j) - F(alpha_{y_i-1} - mu_j)
+  upper <- outer(alpha_ext[yvec + 1], mu_support, "-")  # (n, m)
+  lower <- outer(alpha_ext[yvec], mu_support, "-")  # (n, m)
+  probs <- F_link(upper) - F_link(lower)
+  probs[probs < 1e-16] <- 1e-16
+
+  return(probs)
+}
+
+# Compute psi_ij = E[I{covariates_i = support_j} | Y_i; theta, q_j] for S=0
+# called by orm_mle0()
+compute_psi_mle0 <- function(prob_y_given_support, q_j) {
+  psi_num <- sweep(prob_y_given_support, 2, q_j, "*")  # (n0, m)
+  psi_denom <- pmax(1e-16, rowSums(psi_num))
+  return(psi_num / psi_denom)
+}
+
+# M-step: update theta by maximizing the weighted log-likelihood
+# called by orm_mle0()
+update_theta_mle0 <- function(theta, psi_ij, yvec_s1, yvec_s0, Xmat_s1, support_mat, family) {
+  n1 <- length(yvec_s1)
+  n0 <- length(yvec_s0)
+  m <- nrow(support_mat)
+
+  # S=0: expand each subject across all m support points
+  yvec_s0_long <- rep(yvec_s0, each = m)
+  psi_s0_long <- as.vector(t(psi_ij))  # (n0 * m,)
+  Xmat_s0_long <- support_mat[rep(1:m, n0), , drop = FALSE]
+
+  # Combine S=1 and S=0
+  yvec_full <- c(yvec_s1, yvec_s0_long)
+  Xmat_full <- rbind(Xmat_s1, Xmat_s0_long)
+  w_full <- c(rep(1, n1), psi_s0_long)
+
+  fit <- stats::optim(
+    par = theta, fn = weighted_nll, gr = weighted_grad,
+    yvec = yvec_full, Xmat = Xmat_full, w_iv = w_full, family, method = "BFGS"
+  )
+
+  return(fit$par)
+}
+
+# M-step: update q_j = (1/n) * sum_i psi_ij
+# called by orm_mle0()
+update_q_mle0 <- function(psi_ij, s1_support_idx, n) {
+  m <- ncol(psi_ij)
+  s1_counts <- tabulate(s1_support_idx, nbins = m)
+  s0_sums <- colSums(psi_ij)
+  q_j <- (s1_counts + s0_sums) / n
+  return(q_j)
+}
+
+# Log-likelihood for MLE0
+# called by mle0_pll()
+mle0_ll <- function(theta, q_j, yvec_s1, yvec_s0, Xmat_s1, support_mat, s1_support_idx, family,
+                    prob_y_given_support_s0 = NULL) {
+  pcovs <- ncol(Xmat_s1)
+  beta <- theta[1:pcovs]
+  alpha <- theta[(pcovs + 1):length(theta)]
+
+  # S=1: log P(Y_i | X_i; theta) + log q_{j(i)}
+  mu_s1 <- as.vector(Xmat_s1 %*% beta)
+  alpha_ext <- c(-Inf, alpha, Inf)
+  if (family == "probit") {
+    F_link <- stats::pnorm
+  } else if (family == "logistic") {
+    F_link <- stats::plogis
+  }
+  prob_s1 <- pmax(1e-16, F_link(alpha_ext[yvec_s1 + 1] - mu_s1) - F_link(alpha_ext[yvec_s1] - mu_s1))
+  ll_s1 <- sum(log(prob_s1)) + sum(log(pmax(1e-16, q_j[s1_support_idx])))
+
+  # S=0: log sum_j P(Y_i | support_j; theta) * q_j
+  if (is.null(prob_y_given_support_s0)) {
+    prob_y_given_support_s0 <- compute_py_given_support(theta, yvec_s0, support_mat, family)
+  }
+  prob_s0 <- pmax(1e-16, as.vector(prob_y_given_support_s0 %*% q_j))
+  ll_s0 <- sum(log(prob_s0))
+
+  return(ll_s1 + ll_s0)
+}
+
+# Profile log-likelihood for MLE0: hold theta fixed, optimize q_j
+# called by estimate_se_mle0()
+mle0_pll <- function(theta, q_j, yvec_s1, yvec_s0, Xmat_s1, support_mat, s1_support_idx, family, max_iter, tol) {
+  n <- length(yvec_s1) + length(yvec_s0)
+
+  # Pre-compute P(Y_i | support_j; theta) for S=0 (fixed theta)
+  prob_y_s0 <- compute_py_given_support(theta, yvec_s0, support_mat, family)
+
+  # EM loop: update only q_j
+  for (iter in 1:max_iter) {
+    q_old <- q_j
+    psi_ij <- compute_psi_mle0(prob_y_s0, q_j)
+    q_j <- update_q_mle0(psi_ij, s1_support_idx, n)
+    if (max(abs(q_j - q_old)) < tol) break
+  }
+
+  ll <- mle0_ll(theta, q_j, yvec_s1, yvec_s0, Xmat_s1, support_mat, s1_support_idx, family, prob_y_s0)
+  attr(ll, "pll_inner_iter") <- as.integer(iter)
+  return(ll)
+}
+
+# Estimate SE for MLE0 via profile likelihood Hessian
+# called by orm_mle0()
+estimate_se_mle0 <- function(theta, q_j, yvec_s1, yvec_s0, Xmat_s1, support_mat, s1_support_idx, family, max_iter, tol,
+                             method = "forward", verbose = FALSE) {
+  se_pll_max_iters <- integer(0)
+  pll_func <- function(t) {
+    result <- mle0_pll(t, q_j, yvec_s1, yvec_s0, Xmat_s1, support_mat, s1_support_idx, family, max_iter, tol)
+    se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
+    result
+  }
+
+  if (method == "numDeriv") {
+    hess <- numDeriv::hessian(pll_func, theta)
+  } else {
+    # Second-order forward-difference Hessian
+    nparams <- length(theta)
+    n <- length(yvec_s1) + length(yvec_s0)
+    hn <- n^(-1/2)
+    e_mat <- diag(hn, nparams)
+
+    pl_0d <- pll_func(theta)
+    pl_1d <- numeric(nparams)
+    for (i in seq_len(nparams)) {
+      pl_1d[i] <- pll_func(theta + e_mat[i, ])
+    }
+    pl_2d <- matrix(NA, nparams, nparams)
+    for (i in seq_len(nparams)) {
+      for (j in i:nparams) {
+        pl_2d[i, j] <- pl_2d[j, i] <- pll_func(theta + e_mat[i, ] + e_mat[j, ])
+      }
+    }
+
+    hess <- matrix(NA, nparams, nparams)
+    for (i in seq_len(nparams)) {
+      for (j in i:nparams) {
+        hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
+      }
+    }
+  }
+
+  if (verbose && length(se_pll_max_iters) > 0) {
+    n_evals <- length(se_pll_max_iters)
+    n_hit_max <- sum(se_pll_max_iters >= max_iter)
+    cat(sprintf("SE: %d PLL evaluations, inner q_j EM used %d-%d iters (max_iter = %d, %d hit max)\n",
+                n_evals, min(se_pll_max_iters), max(se_pll_max_iters), max_iter, n_hit_max))
+  }
+
+  vcov_mat <- try(solve(-hess), silent = TRUE)
+  if (inherits(vcov_mat, "try-error")) {
+    warning("Hessian inversion failed; standard errors cannot be computed.")
+    return(list(se = rep(NA, length(theta)), vcov = NULL))
+  }
+
+  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, se_max_iterations = max(se_pll_max_iters)))
 }
 
 # -- Model 2 (continuous) Helpers ----
