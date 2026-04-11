@@ -337,6 +337,87 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
   return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, se_max_iterations = max(se_pll_max_iters)))
 }
 
+# Estimate SE via envelope theorem: analytical profile score + numerical Jacobian
+# called by orm_smle2()
+estimate_se_smle_envelope <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol,
+                                      verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
+  se_pll_max_iters <- integer(0)
+  score_func <- function(t) {
+    result <- smle_profile_score(
+      theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+      x_support, x_colname, family, max_iter, tol, x_inter_colname, z_inter_colname)
+    se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
+    as.vector(result)
+  }
+
+  # Jacobian of score = Hessian of log-likelihood (first-order numerical differentiation)
+  hess <- numDeriv::jacobian(score_func, theta)
+  hess <- (hess + t(hess)) / 2  # Symmetrize numerical artifacts
+
+  if (verbose && length(se_pll_max_iters) > 0) {
+    n_evals <- length(se_pll_max_iters)
+    n_hit_max <- sum(se_pll_max_iters >= max_iter)
+    cat(sprintf("SE (envelope): %d score evaluations, inner p_vl EM used %d-%d iters (max_iter = %d, %d hit max)\n",
+                n_evals, min(se_pll_max_iters), max(se_pll_max_iters), max_iter, n_hit_max))
+  }
+
+  vcov_mat <- try(solve(-hess), silent = TRUE)
+  if (inherits(vcov_mat, "try-error")) {
+    warning("Hessian inversion failed; standard errors cannot be computed.")
+    return(list(se = rep(NA, length(theta)), vcov = NULL, se_max_iterations = NULL))
+  }
+
+  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, se_max_iterations = max(se_pll_max_iters)))
+}
+
+# Analytical profile score via envelope theorem
+# At the profile optimum p_vl*(theta), dℓ/dp_vl = 0, so:
+#   dℓ_profile/dtheta = partial ℓ / partial theta |_{p_vl = p_vl*(theta)}
+# This equals the weighted score with w_iv as weights for S=0 subjects.
+# called by estimate_se_smle_envelope()
+smle_profile_score <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+                               x_support, x_colname, family, max_iter, tol,
+                               x_inter_colname = NULL, z_inter_colname = NULL) {
+  # 1. Compute P(Y|x_v, Z) for S=0 at this theta
+  prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family,
+                                                 x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
+
+  # 2. Optimize p_vl for this theta
+  p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
+
+  # 3. Compute w_iv using optimized p_vl
+  w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_opt, Bbasis_s0)
+
+  # 4. Construct full weighted data (same expansion as update_theta_smle)
+  n1 <- length(yvec_s1); n0 <- length(yvec_s0)
+  d_size <- nrow(x_support)
+
+  yvec_s0_long <- rep(yvec_s0, each = d_size)
+  w_iv_s0_long <- as.vector(t(w_iv))
+  Xmat_s0_long <- Xmat_s0[rep(1:n0, each = d_size), , drop = FALSE]
+  Xmat_s0_long[, x_colname] <- x_support[rep(1:nrow(x_support), n0), , drop = FALSE]
+
+  if (length(x_inter_colname) > 0) {
+    n_x <- length(x_colname); n_z <- length(z_inter_colname)
+    for (j in seq_len(n_z)) {
+      for (k in seq_len(n_x)) {
+        inter_col <- x_inter_colname[(j - 1) * n_x + k]
+        Xmat_s0_long[, inter_col] <- Xmat_s0_long[, x_colname[k]] * Xmat_s0_long[, z_inter_colname[j]]
+      }
+    }
+  }
+
+  yvec_full <- c(yvec_s1, yvec_s0_long)
+  Xmat_full <- rbind(Xmat_s1, Xmat_s0_long)
+  w_full <- c(rep(1, n1), w_iv_s0_long)
+
+  # 5. Score = -weighted_grad (since weighted_grad is gradient of the negative log-likelihood)
+  score <- -weighted_grad(theta, yvec_full, Xmat_full, w_full, family)
+
+  attr(score, "pll_inner_iter") <- as.integer(attr(p_vl_opt, "iterations"))
+  return(score)
+}
+
 # Profile log-likelihood
 # called by estimate_se_smle()
 smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
