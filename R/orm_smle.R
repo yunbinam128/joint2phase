@@ -8,7 +8,8 @@
 #' @param theta_init Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.
 #' @param p_vl_init Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
-#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = n^{-1/2}} (matches the paper's second-order FD formula). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
+#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h_n\_scale \times n^{-1/2}} (the paper's second-order FD formula, with an optional scale multiplier). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
+#' @param h_n_scale Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1. Reduce (e.g. 0.1) when the Hessian via large-step forward FD is noisy, as occurs when the outer EM requires many iterations per PLL evaluation or when covariates are on heterogeneous scales.
 #' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer. Defaults to 1e-6.
@@ -22,9 +23,12 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
                      se_calc = TRUE, se_method = "forward",
                      verbose = TRUE, max_iter = 500, tol = 1e-6,
                      se_max_iter = 1000, se_tol = 1e-8,
-                     p_vl_init = NULL) {
+                     p_vl_init = NULL, h_n_scale = 1) {
   # -- 0. Validate ----
   se_method <- match.arg(se_method, c("forward", "numDeriv"))
+  if (!is.numeric(h_n_scale) || length(h_n_scale) != 1 || !is.finite(h_n_scale) || h_n_scale <= 0) {
+    stop("'h_n_scale' must be a single positive finite number.")
+  }
   if (!(family %in% c("probit", "logistic"))) {
     stop("The 'family' must be \"probit\" or \"logistic\".")
   }
@@ -178,7 +182,8 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
       yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, se_max_iter, se_tol,
-      method = se_method, verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
+      method = se_method, h_n_scale = h_n_scale,
+      verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
     )
     se <- se_results$se
     vcov <- se_results$vcov

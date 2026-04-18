@@ -283,6 +283,7 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 #                      (matches the second-order FD formula in the paper)
 # method = "numDeriv": Richardson-extrapolated Hessian via numDeriv::hessian()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
+                             h_n_scale = 1,
                              verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
   se_pll_max_iters <- integer(0)
   p_vl_moves      <- numeric(0)
@@ -302,10 +303,10 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
     hn <- NA_real_
   } else {
     # Manual second-order forward-difference Hessian:
-    #   H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2, h = n^(-1/2)
+    #   H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2, h = h_n_scale * n^(-1/2)
     nparams <- length(theta)
     n <- length(yvec_s1) + length(yvec_s0)
-    hn <- n^(-1/2)
+    hn <- h_n_scale * n^(-1/2)
     e_mat <- diag(hn, nparams)
 
     pl_0d <- pll_func(theta)

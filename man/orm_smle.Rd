@@ -11,14 +11,15 @@ orm_smle(
   x_name,
   family = "probit",
   theta_init = NULL,
-  p_vl_init = NULL,
   se_calc = TRUE,
   se_method = "forward",
   verbose = TRUE,
   max_iter = 500,
   tol = 1e-06,
   se_max_iter = 1000,
-  se_tol = 1e-08
+  se_tol = 1e-08,
+  p_vl_init = NULL,
+  h_n_scale = 1
 )
 }
 \arguments{
@@ -34,11 +35,9 @@ orm_smle(
 
 \item{theta_init}{Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.}
 
-\item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
-
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
-\item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = n^{-1/2}} (matches the paper's second-order FD formula). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
+\item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h_n\_scale \times n^{-1/2}} (the paper's second-order FD formula, with an optional scale multiplier). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
 
 \item{verbose}{Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.}
 
@@ -49,6 +48,10 @@ orm_smle(
 \item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
 
 \item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
+
+\item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
+
+\item{h_n_scale}{Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1. Reduce (e.g. 0.1) when the Hessian via large-step forward FD is noisy, as occurs when the outer EM requires many iterations per PLL evaluation or when covariates are on heterogeneous scales.}
 }
 \value{
 A list containing estimates and convergence info.

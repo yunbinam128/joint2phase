@@ -11,13 +11,13 @@ orm_smle2(
   x_name,
   family = "probit",
   theta_init = NULL,
-  p_vl_init = NULL,
   se_calc = TRUE,
   verbose = TRUE,
   max_iter = 500,
   tol = 1e-06,
   se_max_iter = 1000,
   se_tol = 1e-08,
+  p_vl_init = NULL,
   jacobian_method = "Richardson",
   jacobian_method_args = list()
 )
@@ -35,8 +35,6 @@ orm_smle2(
 
 \item{theta_init}{Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.}
 
-\item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
-
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
 \item{verbose}{Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.}
@@ -48,6 +46,8 @@ orm_smle2(
 \item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
 
 \item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
+
+\item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
 
 \item{jacobian_method}{Passed to \code{numDeriv::jacobian}. \code{"Richardson"}
 (default) performs extrapolation across multiple small steps; \code{"simple"}
