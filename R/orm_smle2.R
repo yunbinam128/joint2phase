@@ -6,13 +6,26 @@
 #' profile log-likelihood via \code{numDeriv::hessian} (second-order).
 #'
 #' @inheritParams orm_smle
+#' @param jacobian_method Passed to \code{numDeriv::jacobian}. \code{"Richardson"}
+#'   (default) performs extrapolation across multiple small steps; \code{"simple"}
+#'   is a forward difference with a single user-specified step.
+#' @param jacobian_method_args Named list forwarded as \code{method.args} to
+#'   \code{numDeriv::jacobian}. For \code{"simple"} this controls \code{eps}
+#'   (step size). To mirror the PLL step, use
+#'   \code{list(eps = length(data)^(-1/2))}.
 #'
-#' @return A list containing estimates and convergence info.
+#' @return A list containing estimates, SE, and (if \code{se_calc=TRUE}) a
+#'   \code{se_diagnostics} element with per-evaluation \code{p_vl_move},
+#'   \code{score_mags}, \code{inner_iters}, \code{theta_perturb}, the raw
+#'   (unsymmetrized) Hessian, and the numDeriv settings used.
 #' @export
 orm_smle2 <- function(formula, data, Bbasis, x_name, family = "probit",
-                      theta_init = NULL, se_calc = TRUE,
+                      theta_init = NULL, p_vl_init = NULL,
+                      se_calc = TRUE,
                       verbose = TRUE, max_iter = 500, tol = 1e-6,
-                      se_max_iter = 1000, se_tol = 1e-8) {
+                      se_max_iter = 1000, se_tol = 1e-8,
+                      jacobian_method = "Richardson",
+                      jacobian_method_args = list()) {
   # -- 0. Validate ----
   if (!(family %in% c("probit", "logistic"))) {
     stop("The 'family' must be \"probit\" or \"logistic\".")
@@ -110,6 +123,14 @@ orm_smle2 <- function(formula, data, Bbasis, x_name, family = "probit",
   indicator_mat[cbind(seq_along(s1_raw_match), s1_raw_match)] <- 1
   p_vl_num_init <- t(indicator_mat) %*% Bbasis_s1  # (d, s_n)
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
+  if (!is.null(p_vl_init)) {
+    if (!all(dim(p_vl_init) == dim(p_vl_curr))) {
+      warning(sprintf("p_vl_init dimensions %s do not match expected %s; ignoring warm start.",
+                      paste(dim(p_vl_init), collapse = "x"), paste(dim(p_vl_curr), collapse = "x")))
+    } else {
+      p_vl_curr <- p_vl_init
+    }
+  }
 
   # -- 3. EM Loop ----
   converged <- FALSE
@@ -152,17 +173,22 @@ orm_smle2 <- function(formula, data, Bbasis, x_name, family = "probit",
   se <- NULL
   vcov <- NULL
   se_max_iterations <- NULL
+  se_diagnostics <- NULL
   if (se_calc) {
     se_results <- estimate_se_smle_envelope(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
       yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, se_max_iter, se_tol,
-      verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
+      verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname,
+      jacobian_method = jacobian_method, jacobian_method_args = jacobian_method_args
     )
     se <- se_results$se
     vcov <- se_results$vcov
     se_max_iterations <- se_results$se_max_iterations
+    se_diagnostics <- se_results$diagnostics
     names(se) <- rownames(vcov) <- colnames(vcov) <- names(theta_curr)
   }
 
-  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr, iterations = iter, se_max_iterations = se_max_iterations))
+  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr,
+              iterations = iter, se_max_iterations = se_max_iterations,
+              se_diagnostics = se_diagnostics))
 }

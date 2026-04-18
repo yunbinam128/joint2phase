@@ -11,12 +11,15 @@ orm_smle2(
   x_name,
   family = "probit",
   theta_init = NULL,
+  p_vl_init = NULL,
   se_calc = TRUE,
   verbose = TRUE,
   max_iter = 500,
   tol = 1e-06,
   se_max_iter = 1000,
-  se_tol = 1e-08
+  se_tol = 1e-08,
+  jacobian_method = "Richardson",
+  jacobian_method_args = list()
 )
 }
 \arguments{
@@ -30,7 +33,9 @@ orm_smle2(
 
 \item{family}{Character value specifying the distribution family, which is one of the following: "logit", "probit"}
 
-\item{theta_init}{Optional initial vector for theta (beta, cutpoints).}
+\item{theta_init}{Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.}
+
+\item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
 
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
@@ -43,9 +48,21 @@ orm_smle2(
 \item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
 
 \item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
+
+\item{jacobian_method}{Passed to \code{numDeriv::jacobian}. \code{"Richardson"}
+(default) performs extrapolation across multiple small steps; \code{"simple"}
+is a forward difference with a single user-specified step.}
+
+\item{jacobian_method_args}{Named list forwarded as \code{method.args} to
+\code{numDeriv::jacobian}. For \code{"simple"} this controls \code{eps}
+(step size). To mirror the PLL step, use
+\code{list(eps = length(data)^(-1/2))}.}
 }
 \value{
-A list containing estimates and convergence info.
+A list containing estimates, SE, and (if \code{se_calc=TRUE}) a
+\code{se_diagnostics} element with per-evaluation \code{p_vl_move},
+\code{score_mags}, \code{inner_iters}, \code{theta_perturb}, the raw
+(unsymmetrized) Hessian, and the numDeriv settings used.
 }
 \description{
 Same estimator as \code{\link{orm_smle}}, but computes standard errors using

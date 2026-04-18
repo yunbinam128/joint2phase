@@ -5,9 +5,10 @@
 #' @param Bbasis Basis matrix for the spline basis.
 #' @param x_name Name of the expensive covariate X.
 #' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
-#' @param theta_init Optional initial vector for theta (beta, cutpoints).
+#' @param theta_init Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.
+#' @param p_vl_init Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
-#' @param se_method Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}.
+#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = n^{-1/2}} (matches the paper's second-order FD formula). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
 #' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer. Defaults to 1e-6.
@@ -17,7 +18,8 @@
 #' @return A list containing estimates and convergence info.
 #' @export
 orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
-                     theta_init = NULL, se_calc = TRUE, se_method = "forward",
+                     theta_init = NULL, p_vl_init = NULL,
+                     se_calc = TRUE, se_method = "forward",
                      verbose = TRUE, max_iter = 500, tol = 1e-6,
                      se_max_iter = 1000, se_tol = 1e-8) {
   # -- 0. Validate ----
@@ -118,6 +120,14 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   indicator_mat[cbind(seq_along(s1_raw_match), s1_raw_match)] <- 1
   p_vl_num_init <- t(indicator_mat) %*% Bbasis_s1  # (d, s_n)
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
+  if (!is.null(p_vl_init)) {
+    if (!all(dim(p_vl_init) == dim(p_vl_curr))) {
+      warning(sprintf("p_vl_init dimensions %s do not match expected %s; ignoring warm start.",
+                      paste(dim(p_vl_init), collapse = "x"), paste(dim(p_vl_curr), collapse = "x")))
+    } else {
+      p_vl_curr <- p_vl_init
+    }
+  }
 
   # -- 3. EM Loop ----
   converged <- FALSE
@@ -160,6 +170,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
   se <- NULL
   vcov <- NULL
   se_max_iterations <- NULL
+  se_diagnostics <- NULL
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
@@ -169,8 +180,11 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     se <- se_results$se
     vcov <- se_results$vcov
     se_max_iterations <- se_results$se_max_iterations
+    se_diagnostics <- se_results$diagnostics
     names(se) <- rownames(vcov) <- colnames(vcov) <- names(theta_curr)
   }
 
-  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr, iterations = iter, se_max_iterations = se_max_iterations))
+  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr,
+              iterations = iter, se_max_iterations = se_max_iterations,
+              se_diagnostics = se_diagnostics))
 }

@@ -11,6 +11,7 @@ orm_smle(
   x_name,
   family = "probit",
   theta_init = NULL,
+  p_vl_init = NULL,
   se_calc = TRUE,
   se_method = "forward",
   verbose = TRUE,
@@ -31,11 +32,13 @@ orm_smle(
 
 \item{family}{Character value specifying the distribution family, which is one of the following: "logit", "probit"}
 
-\item{theta_init}{Optional initial vector for theta (beta, cutpoints).}
+\item{theta_init}{Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.}
+
+\item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
 
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
-\item{se_method}{Character value specifying the method for SE estimation: "forward" uses second-order forward-difference Hessian (default) and "numDeriv" uses Richardson extrapolation via \code{numDeriv::hessian()}.}
+\item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = n^{-1/2}} (matches the paper's second-order FD formula). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
 
 \item{verbose}{Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.}
 

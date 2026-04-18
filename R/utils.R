@@ -278,22 +278,31 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 
 ## -- SE Estimation ----
 # Estimate SE via profile likelihood
-# called by smle_probit()
+# called by orm_smle()
+# method = "forward":  manual second-order forward-difference Hessian with h_n = n^(-1/2)
+#                      (matches the second-order FD formula in the paper)
+# method = "numDeriv": Richardson-extrapolated Hessian via numDeriv::hessian()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
                              verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
   se_pll_max_iters <- integer(0)
+  p_vl_moves      <- numeric(0)
+  theta_perturb   <- numeric(0)
   pll_func <- function(t) {
     result <- smle_probit_pll(
       theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
       x_support, x_colname, family, max_iter, tol, x_inter_colname, z_inter_colname)
     se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
+    p_vl_moves[[length(p_vl_moves) + 1]]             <<- attr(result, "p_vl_move")
+    theta_perturb[[length(theta_perturb) + 1]]       <<- max(abs(t - theta))
     result
   }
 
   if (method == "numDeriv") {
     hess <- numDeriv::hessian(pll_func, theta)
+    hn <- NA_real_
   } else {
-    # Second-order forward-difference Hessian (faster than numDeriv)
+    # Manual second-order forward-difference Hessian:
+    #   H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2, h = n^(-1/2)
     nparams <- length(theta)
     n <- length(yvec_s1) + length(yvec_s0)
     hn <- n^(-1/2)
@@ -311,7 +320,6 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
       }
     }
 
-    # H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2
     hess <- matrix(NA, nparams, nparams)
     for (i in seq_len(nparams)) {
       for (j in i:nparams) {
@@ -319,46 +327,96 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
       }
     }
   }
+  hess_asym_rel <- if (max(abs(hess)) > 0) max(abs(hess - t(hess))) / max(abs(hess)) else NA_real_
+
+  # Score at MLE (should be ~0 at convergence). Uses the envelope-theorem score
+  # as a single-evaluation diagnostic independent of the Hessian scheme.
+  score_at_mle <- tryCatch(
+    as.vector(smle_profile_score(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+                                 x_support, x_colname, family, max_iter, tol, x_inter_colname, z_inter_colname)),
+    error = function(e) rep(NA_real_, length(theta))
+  )
 
   if (verbose && length(se_pll_max_iters) > 0) {
     n_evals <- length(se_pll_max_iters)
     n_hit_max <- sum(se_pll_max_iters >= max_iter)
-    cat(sprintf("SE: %d PLL evaluations, inner p_vl EM used %d-%d iters (max_iter = %d, %d hit max)\n",
-                n_evals, min(se_pll_max_iters), max(se_pll_max_iters), max_iter, n_hit_max))
+    cat(sprintf("SE (%s): %d PLL evals | inner iters %d-%d (max=%d, hit-max=%d)\n",
+                method, n_evals, min(se_pll_max_iters), max(se_pll_max_iters), max_iter, n_hit_max))
+    cat(sprintf("  theta perturb |h|:   min=%.2e  med=%.2e  max=%.2e  (h_n = %s)\n",
+                min(theta_perturb), stats::median(theta_perturb), max(theta_perturb),
+                if (is.na(hn)) "n/a (Richardson)" else sprintf("%.2e", hn)))
+    cat(sprintf("  p_vl move per eval:  min=%.2e  med=%.2e  max=%.2e  (se_tol=%.2e)\n",
+                min(p_vl_moves), stats::median(p_vl_moves), max(p_vl_moves), tol))
+    cat(sprintf("  |score| at MLE:      max=%.2e  (should be ~0 if EM converged)\n",
+                max(abs(score_at_mle))))
+    cat(sprintf("  Hessian asymmetry rel: %.2e\n", hess_asym_rel))
   }
 
   # Estimate Covariance and SE
   vcov_mat <- try(solve(-hess), silent = TRUE)
   if (inherits(vcov_mat, "try-error")) {
     warning("Hessian inversion failed; standard errors cannot be computed.")
-    return(list(se = rep(NA, length(theta)), vcov = NULL))
+    return(list(se = rep(NA, length(theta)), vcov = NULL, se_max_iterations = NULL,
+                diagnostics = NULL))
   }
 
-  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, se_max_iterations = max(se_pll_max_iters)))
+  diagnostics <- list(
+    method        = method,
+    hn            = hn,
+    p_vl_moves    = p_vl_moves,
+    inner_iters   = se_pll_max_iters,
+    theta_perturb = theta_perturb,
+    score_at_mle  = score_at_mle,
+    hess          = hess,
+    hess_asym_rel = hess_asym_rel
+  )
+
+  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat,
+              se_max_iterations = max(se_pll_max_iters),
+              diagnostics = diagnostics))
 }
 
 # Estimate SE via envelope theorem: analytical profile score + numerical Jacobian
 # called by orm_smle2()
+# jacobian_method / jacobian_method_args: forwarded to numDeriv::jacobian. Defaults to
+#   Richardson extrapolation. To mirror the PLL step (hn = n^(-1/2)) use
+#   jacobian_method = "simple" with jacobian_method_args = list(eps = n^(-1/2)).
 estimate_se_smle_envelope <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol,
-                                      verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
+                                      verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL,
+                                      jacobian_method = "Richardson", jacobian_method_args = list()) {
   se_pll_max_iters <- integer(0)
+  p_vl_moves <- numeric(0)
+  score_mags <- numeric(0)
+  theta_perturb <- numeric(0)
   score_func <- function(t) {
     result <- smle_profile_score(
       theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
       x_support, x_colname, family, max_iter, tol, x_inter_colname, z_inter_colname)
     se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
+    p_vl_moves[[length(p_vl_moves) + 1]]             <<- attr(result, "p_vl_move")
+    score_mags[[length(score_mags) + 1]]             <<- max(abs(as.vector(result)))
+    theta_perturb[[length(theta_perturb) + 1]]       <<- max(abs(t - theta))
     as.vector(result)
   }
 
   # Jacobian of score = Hessian of log-likelihood (first-order numerical differentiation)
-  hess <- numDeriv::jacobian(score_func, theta)
-  hess <- (hess + t(hess)) / 2  # Symmetrize numerical artifacts
+  hess_raw <- numDeriv::jacobian(score_func, theta, method = jacobian_method,
+                                 method.args = jacobian_method_args)
+  hess <- (hess_raw + t(hess_raw)) / 2  # Symmetrize numerical artifacts
+  hess_asym_rel <- if (max(abs(hess_raw)) > 0) max(abs(hess_raw - t(hess_raw))) / max(abs(hess_raw)) else NA_real_
 
   if (verbose && length(se_pll_max_iters) > 0) {
     n_evals <- length(se_pll_max_iters)
     n_hit_max <- sum(se_pll_max_iters >= max_iter)
-    cat(sprintf("SE (envelope): %d score evaluations, inner p_vl EM used %d-%d iters (max_iter = %d, %d hit max)\n",
+    cat(sprintf("SE (envelope): %d score evals | inner iters %d-%d (max=%d, hit-max=%d)\n",
                 n_evals, min(se_pll_max_iters), max(se_pll_max_iters), max_iter, n_hit_max))
+    cat(sprintf("  theta perturb |h|:    min=%.2e  med=%.2e  max=%.2e\n",
+                min(theta_perturb), stats::median(theta_perturb), max(theta_perturb)))
+    cat(sprintf("  p_vl move per eval:   min=%.2e  med=%.2e  max=%.2e  (se_tol=%.2e)\n",
+                min(p_vl_moves), stats::median(p_vl_moves), max(p_vl_moves), tol))
+    cat(sprintf("  |score| per eval:     min=%.2e  med=%.2e  max=%.2e\n",
+                min(score_mags), stats::median(score_mags), max(score_mags)))
+    cat(sprintf("  Hessian asymmetry rel: %.2e\n", hess_asym_rel))
   }
 
   vcov_mat <- try(solve(-hess), silent = TRUE)
@@ -367,28 +425,40 @@ estimate_se_smle_envelope <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xm
     return(list(se = rep(NA, length(theta)), vcov = NULL, se_max_iterations = NULL))
   }
 
-  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, se_max_iterations = max(se_pll_max_iters)))
+  diagnostics <- list(
+    p_vl_moves  = p_vl_moves,
+    score_mags  = score_mags,
+    inner_iters = se_pll_max_iters,
+    theta_perturb = theta_perturb,
+    hess_raw    = hess_raw,
+    hess_asym_rel = hess_asym_rel,
+    jacobian_method = jacobian_method,
+    jacobian_method_args = jacobian_method_args
+  )
+
+  return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat, hess = hess,
+              se_max_iterations = max(se_pll_max_iters), diagnostics = diagnostics))
 }
 
 # Analytical profile score via envelope theorem
-# At the profile optimum p_vl*(theta), dℓ/dp_vl = 0, so:
-#   dℓ_profile/dtheta = partial ℓ / partial theta |_{p_vl = p_vl*(theta)}
-# This equals the weighted score with w_iv as weights for S=0 subjects.
+# At the profile optimum p_vl*(theta), dl/dp_vl = 0, so:
+#   dpl/dtheta = dl/dtheta at {p_vl = p_vl*(theta)}
 # called by estimate_se_smle_envelope()
 smle_profile_score <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
                                x_support, x_colname, family, max_iter, tol,
                                x_inter_colname = NULL, z_inter_colname = NULL) {
-  # 1. Compute P(Y|x_v, Z) for S=0 at this theta
+  # Compute P(Y|x_v, Z) for S=0 at this theta
   prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family,
-                                                 x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
+                                               x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
 
-  # 2. Optimize p_vl for this theta
+  # Optimize p_vl for this theta
   p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
+  p_vl_move <- max(abs(as.vector(p_vl_opt) - as.vector(p_vl)))
 
-  # 3. Compute w_iv using optimized p_vl
+  # Compute w_iv using optimized p_vl
   w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_opt, Bbasis_s0)
 
-  # 4. Construct full weighted data (same expansion as update_theta_smle)
+  # Construct full weighted data
   n1 <- length(yvec_s1); n0 <- length(yvec_s0)
   d_size <- nrow(x_support)
 
@@ -411,10 +481,11 @@ smle_profile_score <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, 
   Xmat_full <- rbind(Xmat_s1, Xmat_s0_long)
   w_full <- c(rep(1, n1), w_iv_s0_long)
 
-  # 5. Score = -weighted_grad (since weighted_grad is gradient of the negative log-likelihood)
+  # Score = -weighted_grad (where weighted_grad = gradient of nll)
   score <- -weighted_grad(theta, yvec_full, Xmat_full, w_full, family)
 
   attr(score, "pll_inner_iter") <- as.integer(attr(p_vl_opt, "iterations"))
+  attr(score, "p_vl_move")      <- p_vl_move
   return(score)
 }
 
@@ -429,10 +500,12 @@ smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xma
 
   # EM Loop: Update only p_vl
   p_vl_opt <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl, p_vl_s1, max_iter, tol)
+  p_vl_move <- max(abs(as.vector(p_vl_opt) - as.vector(p_vl)))
 
   # Pass pre-computed prob_y_given_xv_s0 to avoid redundant computation
   ll <- smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0)
   attr(ll, "pll_inner_iter") <- as.integer(attr(p_vl_opt, "iterations"))
+  attr(ll, "p_vl_move")      <- p_vl_move
   return(ll)
 }
 
