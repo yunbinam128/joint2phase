@@ -20,10 +20,11 @@
 #'   (unsymmetrized) Hessian, and the numDeriv settings used.
 #' @export
 orm_smle2 <- function(formula, data, Bbasis, x_name, family = "probit",
-                      theta_init = NULL, p_vl_init = NULL,
+                      theta_init = NULL,
                       se_calc = TRUE,
                       verbose = TRUE, max_iter = 500, tol = 1e-6,
                       se_max_iter = 1000, se_tol = 1e-8,
+                      p_vl_init = NULL,
                       jacobian_method = "Richardson",
                       jacobian_method_args = list()) {
   # -- 0. Validate ----
@@ -124,9 +125,11 @@ orm_smle2 <- function(formula, data, Bbasis, x_name, family = "probit",
   p_vl_num_init <- t(indicator_mat) %*% Bbasis_s1  # (d, s_n)
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
   if (!is.null(p_vl_init)) {
-    if (!all(dim(p_vl_init) == dim(p_vl_curr))) {
-      warning(sprintf("p_vl_init dimensions %s do not match expected %s; ignoring warm start.",
-                      paste(dim(p_vl_init), collapse = "x"), paste(dim(p_vl_curr), collapse = "x")))
+    if (!is.matrix(p_vl_init) || !identical(dim(p_vl_init), dim(p_vl_curr))) {
+      warning(sprintf("p_vl_init must be a %s matrix; got %s. Ignoring warm start.",
+                      paste(dim(p_vl_curr), collapse = "x"),
+                      if (is.matrix(p_vl_init)) paste(dim(p_vl_init), collapse = "x")
+                      else paste0(class(p_vl_init)[1], " of length ", length(p_vl_init))))
     } else {
       p_vl_curr <- p_vl_init
     }
