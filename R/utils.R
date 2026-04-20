@@ -280,10 +280,9 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 # Estimate SE via profile likelihood
 # called by orm_smle()
 # method = "forward":  manual second-order forward-difference Hessian with h_n = n^(-1/2)
-#                      (matches the second-order FD formula in the paper)
 # method = "numDeriv": Richardson-extrapolated Hessian via numDeriv::hessian()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
-                             h_n_scale = 1,
+                             h_n_scale = 1, hessian_method_args = list(),
                              verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
   se_pll_max_iters <- integer(0)
   p_vl_moves      <- numeric(0)
@@ -299,7 +298,7 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
   }
 
   if (method == "numDeriv") {
-    hess <- numDeriv::hessian(pll_func, theta)
+    hess <- numDeriv::hessian(pll_func, theta, method.args = hessian_method_args)
     hn <- NA_real_
   } else {
     # Manual second-order forward-difference Hessian:
@@ -369,7 +368,8 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
     theta_perturb = theta_perturb,
     score_at_mle  = score_at_mle,
     hess          = hess,
-    hess_asym_rel = hess_asym_rel
+    hess_asym_rel = hess_asym_rel,
+    hessian_method_args = if (method == "numDeriv") hessian_method_args else list()
   )
 
   return(list(se = sqrt(diag(vcov_mat)), vcov = vcov_mat,

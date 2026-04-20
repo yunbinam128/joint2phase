@@ -5,25 +5,24 @@
 #' @param Bbasis Basis matrix for the spline basis.
 #' @param x_name Name of the expensive covariate X.
 #' @param family Character value specifying the distribution family, which is one of the following: "logit", "probit"
-#' @param theta_init Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.
-#' @param p_vl_init Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.
-#' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
-#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h_n\_scale \times n^{-1/2}} (the paper's second-order FD formula, with an optional scale multiplier). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
-#' @param h_n_scale Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1. Reduce (e.g. 0.1) when the Hessian via large-step forward FD is noisy, as occurs when the outer EM requires many iterations per PLL evaluation or when covariates are on heterogeneous scales.
-#' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
 #' @param max_iter Maximum number of EM iterations. Defaults to 500.
 #' @param tol Convergence tolerance for the optimizer. Defaults to 1e-6.
+#' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
+#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h_n\_scale \times n^{-1/2}} (the paper's second-order FD formula, with an optional scale multiplier). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
 #' @param se_max_iter Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.
 #' @param se_tol Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.
+#' @param h_n_scale Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1. Reduce (e.g. 0.1) when the Hessian via large-step forward FD is noisy, as occurs when the outer EM requires many iterations per PLL evaluation or when covariates are on heterogeneous scales.
+#' @param hessian_method_args Named list forwarded as \code{method.args} to \code{numDeriv::hessian}. Use to tune Richardson's initial step \code{d}, number of extrapolation levels \code{r}, contraction factor \code{v}, or zero-component step \code{eps}. Example: \code{list(d = (6 * se_tol)^(1/3), r = 2)} starts Richardson at the noise-aware optimum step and halves the number of levels for roughly 2x speedup. Defaults to \code{list()} (numDeriv defaults: \code{d = 1e-4, r = 4, v = 2, eps = 1e-4}).
+#' @param verbose Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.
+#' @param theta_init Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.
+#' @param p_vl_init Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
-orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
-                     theta_init = NULL,
+orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter = 500, tol = 1e-6,
                      se_calc = TRUE, se_method = "forward",
-                     verbose = TRUE, max_iter = 500, tol = 1e-6,
-                     se_max_iter = 1000, se_tol = 1e-8,
-                     p_vl_init = NULL, h_n_scale = 1) {
+                     se_max_iter = 1000, se_tol = 1e-8, h_n_scale = 1, hessian_method_args = list(),
+                     verbose = TRUE, theta_init = NULL, p_vl_init = NULL) {
   # -- 0. Validate ----
   se_method <- match.arg(se_method, c("forward", "numDeriv"))
   if (!is.numeric(h_n_scale) || length(h_n_scale) != 1 || !is.finite(h_n_scale) || h_n_scale <= 0) {
@@ -182,7 +181,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit",
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
       yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, se_max_iter, se_tol,
-      method = se_method, h_n_scale = h_n_scale,
+      method = se_method, h_n_scale = h_n_scale, hessian_method_args = hessian_method_args,
       verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
     )
     se <- se_results$se
