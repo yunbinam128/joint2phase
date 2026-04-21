@@ -281,7 +281,7 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 # called by orm_smle()
 # method = "forward":  manual second-order forward-difference Hessian with h_n = n^(-1/2)
 # method = "numDeriv": Richardson-extrapolated Hessian via numDeriv::hessian()
-estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, max_iter, tol, method = "forward",
+estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, Bbasis_s1, s1_support_idx, x_support, x_colname, family, max_iter, tol, method = "forward",
                              h_n_scale = 1, hessian_method_args = list(),
                              verbose = FALSE, x_inter_colname = NULL, z_inter_colname = NULL) {
   se_pll_max_iters <- integer(0)
@@ -289,7 +289,7 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
   theta_perturb   <- numeric(0)
   pll_func <- function(t) {
     result <- smle_probit_pll(
-      theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+      theta = t, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, Bbasis_s1, s1_support_idx,
       x_support, x_colname, family, max_iter, tol, x_inter_colname, z_inter_colname)
     se_pll_max_iters[[length(se_pll_max_iters) + 1]] <<- attr(result, "pll_inner_iter")
     p_vl_moves[[length(p_vl_moves) + 1]]             <<- attr(result, "p_vl_move")
@@ -492,7 +492,7 @@ smle_profile_score <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, 
 
 # Profile log-likelihood
 # called by estimate_se_smle()
-smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, Bbasis_s1, s1_support_idx,
                             x_support, x_colname, family, max_iter, tol,
                             x_inter_colname = NULL, z_inter_colname = NULL) {
   # Pre-compute prob_y0_v for FIXED theta
@@ -504,7 +504,9 @@ smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xma
   p_vl_move <- max(abs(as.vector(p_vl_opt) - as.vector(p_vl)))
 
   # Pass pre-computed prob_y_given_xv_s0 to avoid redundant computation
-  ll <- smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0)
+  ll <- smle_probit_ll(theta, p_vl_opt, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, Bbasis_s1, s1_support_idx,
+                      x_support, x_colname, family, prob_y_given_xv_s0,
+                      x_inter_colname = x_inter_colname, z_inter_colname = z_inter_colname)
   attr(ll, "pll_inner_iter") <- as.integer(attr(p_vl_opt, "iterations"))
   attr(ll, "p_vl_move")      <- p_vl_move
   return(ll)
@@ -512,7 +514,14 @@ smle_probit_pll <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xma
 
 # Calculate log-likelihood at fixed theta, p_vl
 # called by estimate_se_smle()
-smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, x_colname, family, prob_y_given_xv_s0 = NULL,
+# The SMLE objective has three additive pieces:
+#   S=1:  log P(Y|X,Z; theta)      (in prob_s1)
+#   S=1:  log p(X|Z; p_vl)         (in prob_x_s1)  -- required for profile-likelihood Hessian
+#   S=0:  log sum_v P(Y|x_v,Z) * sum_l B_l(Z) p_vl (in prob_s0)
+# Omitting prob_x_s1 leaves theta-dependence through hat{p}(theta) in the PLL,
+# which makes the numerical Hessian step-size sensitive even though score_at_mle is ~0.
+smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, Bbasis_s1, s1_support_idx,
+                           x_support, x_colname, family, prob_y_given_xv_s0 = NULL,
                            x_inter_colname = NULL, z_inter_colname = NULL) {
   # For S=1, we need P(Y|X,Z)
   pcovs <- ncol(Xmat_s1)
@@ -527,6 +536,10 @@ smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbas
   }
   prob_s1 <- pmax(1e-16, F_link(alpha_ext[yvec_s1 + 1] - mu_s1) - F_link(alpha_ext[yvec_s1] - mu_s1))
 
+  # For S=1, sieve density p(X_i | Z_i) = sum_l B_l(Z_i) * p_{v_i, l}
+  prob_xv_s1 <- Bbasis_s1 %*% t(p_vl)  # (n1, d)
+  prob_x_s1  <- pmax(1e-16, prob_xv_s1[cbind(seq_along(s1_support_idx), s1_support_idx)])
+
   # For S=0, we need P(Y|Z) = sum_v sum_l P(Y|x_v, Z) * B_l(Z) * p_vl
   if (is.null(prob_y_given_xv_s0)) {
     prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta, yvec_s0, Xmat_s0, x_support, x_colname, family,
@@ -535,7 +548,7 @@ smle_probit_ll <- function(theta, p_vl, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbas
   prob_xv_s0 <- Bbasis_s0 %*% t(p_vl)
   prob_s0 <- pmax(1e-16, rowSums(prob_y_given_xv_s0 * prob_xv_s0))
 
-  return(sum(log(prob_s1)) + sum(log(prob_s0)))
+  return(sum(log(prob_s1)) + sum(log(prob_x_s1)) + sum(log(prob_s0)))
 }
 
 ## -- MLE0 Helpers ----

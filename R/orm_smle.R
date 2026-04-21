@@ -180,7 +180,9 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, x_support, xonly_colname, family, se_max_iter, se_tol,
+      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
+      Bbasis_s1 = Bbasis_s1, s1_support_idx = s1_raw_match,
+      x_support, xonly_colname, family, se_max_iter, se_tol,
       method = se_method, h_n_scale = h_n_scale, hessian_method_args = hessian_method_args,
       verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
     )
