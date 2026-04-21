@@ -14,10 +14,10 @@ orm_smle(
   tol = 1e-06,
   se_calc = TRUE,
   se_method = "forward",
-  se_max_iter = 1000,
-  se_tol = 1e-08,
   h_n_scale = 1,
   hessian_method_args = list(),
+  se_max_iter = 1000,
+  se_tol = 1e-08,
   verbose = TRUE,
   theta_init = NULL,
   p_vl_init = NULL
@@ -42,13 +42,13 @@ orm_smle(
 
 \item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h_n\_scale \times n^{-1/2}} (the paper's second-order FD formula, with an optional scale multiplier). \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
 
-\item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
-
-\item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
-
 \item{h_n_scale}{Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1. Reduce (e.g. 0.1) when the Hessian via large-step forward FD is noisy, as occurs when the outer EM requires many iterations per PLL evaluation or when covariates are on heterogeneous scales.}
 
 \item{hessian_method_args}{Named list forwarded as \code{method.args} to \code{numDeriv::hessian}. Use to tune Richardson's initial step \code{d}, number of extrapolation levels \code{r}, contraction factor \code{v}, or zero-component step \code{eps}. Example: \code{list(d = (6 * se_tol)^(1/3), r = 2)} starts Richardson at the noise-aware optimum step and halves the number of levels for roughly 2x speedup. Defaults to \code{list()} (numDeriv defaults: \code{d = 1e-4, r = 4, v = 2, eps = 1e-4}).}
+
+\item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
+
+\item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
 
 \item{verbose}{Logical; if TRUE, prints convergence info after estimation. Defaults to FALSE.}
 
