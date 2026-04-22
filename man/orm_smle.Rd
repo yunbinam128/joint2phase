@@ -10,14 +10,14 @@ orm_smle(
   Bbasis,
   x_name,
   family = "probit",
-  max_iter = 500,
+  max_iter = 1000,
   tol = 1e-06,
   se_calc = TRUE,
   se_method = "forward",
-  h_n_scale = 1,
+  h_n_scale = 0.1,
   hessian_method_args = list(),
   se_max_iter = 1000,
-  se_tol = 1e-08,
+  se_tol = 1e-06,
   verbose = TRUE,
   theta_init = NULL,
   p_vl_init = NULL
@@ -34,7 +34,7 @@ orm_smle(
 
 \item{family}{Character value specifying the distribution family, which is one of the following: "logistic", "probit"}
 
-\item{max_iter}{Maximum number of EM iterations. Defaults to 500.}
+\item{max_iter}{Maximum number of EM iterations. Defaults to 1000.}
 
 \item{tol}{Convergence tolerance for the optimizer. Defaults to 1e-6.}
 
@@ -42,7 +42,7 @@ orm_smle(
 
 \item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h\_n\_scale \times n^{-1/2}}. \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
 
-\item{h_n_scale}{Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1.}
+\item{h_n_scale}{Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 0.1.}
 
 \item{hessian_method_args}{Named list forwarded as \code{method.args} to \code{numDeriv::hessian}. Defaults to \code{list()} (numDeriv defaults: \code{d = 1e-4, r = 4, v = 2, eps = 1e-4}).}
 

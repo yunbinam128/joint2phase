@@ -5,11 +5,11 @@
 #' @param Bbasis Basis matrix for the spline basis.
 #' @param x_name Name of the expensive covariate X.
 #' @param family Character value specifying the distribution family, which is one of the following: "logistic", "probit"
-#' @param max_iter Maximum number of EM iterations. Defaults to 500.
+#' @param max_iter Maximum number of EM iterations. Defaults to 1000.
 #' @param tol Convergence tolerance for the optimizer. Defaults to 1e-6.
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
 #' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h\_n\_scale \times n^{-1/2}}. \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
-#' @param h_n_scale Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 1.
+#' @param h_n_scale Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 0.1.
 #' @param hessian_method_args Named list forwarded as \code{method.args} to \code{numDeriv::hessian}. Defaults to \code{list()} (numDeriv defaults: \code{d = 1e-4, r = 4, v = 2, eps = 1e-4}).
 #' @param se_max_iter Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.
 #' @param se_tol Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-6.
@@ -19,20 +19,19 @@
 #'
 #' @return A list containing estimates and convergence info.
 #' @export
-orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter = 500, tol = 1e-6,
+orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter = 1000, tol = 1e-6,
                      se_calc = TRUE, se_method = "forward",
-                     h_n_scale = 1, hessian_method_args = list(), se_max_iter = 1000, se_tol = 1e-8,
+                     h_n_scale = 0.1, hessian_method_args = list(), se_max_iter = 1000, se_tol = 1e-6,
                      verbose = TRUE, theta_init = NULL, p_vl_init = NULL) {
   # -- 0. Validate ----
-  se_method <- match.arg(se_method, c("forward", "numDeriv"))
-  if (!is.numeric(h_n_scale) || length(h_n_scale) != 1 || !is.finite(h_n_scale) || h_n_scale <= 0) {
-    stop("'h_n_scale' must be a single positive finite number.")
-  }
   if (!(family %in% c("probit", "logistic"))) {
     stop("The 'family' must be \"probit\" or \"logistic\".")
   }
   if (any(is.na(Bbasis))) {
     stop("The 'Bbasis' matrix contains missing values. B-spline basis must be fully computed.")
+  }
+  if (nrow(Bbasis) != nrow(data)) {
+    stop("Bbasis must have the same number of rows as data.")
   }
   cols2check <- intersect(setdiff(all.vars(formula), x_name), colnames(data))
   na_counts <- colSums(is.na(data[, cols2check, drop = FALSE]))
@@ -42,8 +41,9 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
                paste(missing_cols, collapse = ", "),
                "- Only the column specified in 'x_name' can have missingness."))
   }
-  if (nrow(Bbasis) != nrow(data)) {
-    stop("Bbasis must have the same number of rows as data.")
+  se_method <- match.arg(se_method, c("forward", "numDeriv"))
+  if (!is.numeric(h_n_scale) || length(h_n_scale) != 1 || !is.finite(h_n_scale) || h_n_scale <= 0) {
+    stop("'h_n_scale' must be a single positive finite number.")
   }
 
   # Identify selection indicator (assuming S=1 if x_name is NOT NA, and S=0 if x_name is NA)
@@ -67,20 +67,20 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
   x_colidx <- which(terms_mat[x_rowidx, , drop = FALSE] > 0)
   xonly_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) == 1]
   xonly_colname <- colnames(Xmat)[Xmat_assign %in% xonly_colidx]
-  # Interaction term with X?
-  xinterz_colname <- character(0)
-  xinterz_z_colname <- character(0)
+  # Interaction term with x_name
+  xinterz_colname <- NULL; xinterz_z_colname <- NULL
   xinterz_colidx <- x_colidx[colSums(terms_mat[, x_colidx, drop = FALSE]) > 1]
   if (length(xinterz_colidx) > 0) {
     xinterz_colname <- colnames(Xmat)[Xmat_assign %in% xinterz_colidx]
-    xinterz_z_rowidx <- setdiff(which(terms_mat[, xinterz_colidx] > 0), x_rowidx)
-    if (length(xinterz_z_rowidx) > 1) {
+    xinterz_z_term <- setdiff(names(which(terms_mat[, xinterz_colidx] > 0)), names(x_rowidx))
+    xinterz_z_colidx <- which(colnames(terms_mat) == xinterz_z_term)
+    if (length(xinterz_z_colidx) > 1) {
       stop("Higher-order interactions (e.g., X:Z1:Z2) are not supported. Only two-way interactions allowed.")
     }
-    xinterz_z_colname <- colnames(Xmat)[Xmat_assign == xinterz_z_rowidx]
+    xinterz_z_colname <- colnames(Xmat)[Xmat_assign == xinterz_z_colidx]
   }
 
-  # Support points for X: unique raw values observed in Phase 2
+  # Support points for X: unique raw values observed in Phase 2 (S = 1)
   x_raw_s1 <- data[[x_name]][n1_idx]
   x_raw_unique <- sort(unique(x_raw_s1))
   # Map each Phase 2 subject to their support point index
@@ -98,18 +98,15 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
   use_defaults <- TRUE
   if (!is.null(theta_init)) {
     theta_len <- ncol(Xmat) + (length(unique(yvec)) - 1)
-    if (length(theta_init) == theta_len) {
-      use_defaults <- FALSE
-      theta_curr <- theta_init
+    if (length(theta_init) != theta_len) {
+      warning(sprintf("theta_init must be a vector of length %d. Ignoring warm start.", theta_len))
     } else {
-      warning(paste("theta_init must have length", theta_len))
+      theta_curr <- theta_init
+      use_defaults <- FALSE
     }
   }
   if (use_defaults) {
-    fit_init <- tryCatch(
-      MASS::polr(formula, data, method = family),
-      error = function(e) NULL
-    )
+    fit_init <- tryCatch(MASS::polr(formula, data, method = family), error = function(e) NULL)
     if (!is.null(fit_init)) {
       theta_curr <- as.vector(c(fit_init$coefficients, fit_init$zeta))
     } else {
@@ -126,10 +123,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
   p_vl_curr <- sweep(p_vl_num_init, 2, pmax(1e-16, colSums(p_vl_num_init)), FUN = "/")
   if (!is.null(p_vl_init)) {
     if (!is.matrix(p_vl_init) || !identical(dim(p_vl_init), dim(p_vl_curr))) {
-      warning(sprintf("p_vl_init must be a %s matrix; got %s. Ignoring warm start.",
-                      paste(dim(p_vl_curr), collapse = "x"),
-                      if (is.matrix(p_vl_init)) paste(dim(p_vl_init), collapse = "x")
-                      else paste0(class(p_vl_init)[1], " of length ", length(p_vl_init))))
+      warning(sprintf("p_vl_init must be a %s matrix. Ignoring warm start.", paste(dim(p_vl_curr), collapse = "x")))
     } else {
       p_vl_curr <- p_vl_init
     }
@@ -143,14 +137,17 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
 
     ## -- E-STEP ----
     # For S=0, compute w_iv = E[I_iv | Y_i, Z_i, theta(m), p_vl(m)]
-    prob_y_given_xv_s0 <- compute_py_given_xv_s0(theta_curr, yvec_s0, Xmat_s0, x_support, xonly_colname, family,
-                                                 x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)  # (n0, d)
-    w_iv <- compute_w_iv_s0(prob_y_given_xv_s0, p_vl_curr, Bbasis_s0)  # (n0, d)
+    prob_y_given_xv_s0 <- compute_py_given_xv_s0(  # (n0, d)
+      theta = theta_curr, yvec_s0 = yvec_s0, Xmat_s0 = Xmat_s0, x_support = x_support, x_colname = xonly_colname, family = family,
+      x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)
+    w_iv <- compute_w_iv_s0(prob_y_given_xv_s0 = prob_y_given_xv_s0, p_vl = p_vl_curr, Bbasis_s0 = Bbasis_s0)  # (n0, d)
 
     # -- M-STEP ----
     # Update theta(m+1)
-    theta_curr <- update_theta_smle(theta_curr, w_iv, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, x_support, xonly_colname, family,
-                                    x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)
+    theta_curr <- update_theta_smle(
+      theta = theta_curr, w_iv = w_iv, yvec_s1 = yvec_s1, yvec_s0 = yvec_s0,
+      Xmat_s1 = Xmat_s1, Xmat_s0 = Xmat_s0, x_support = x_support, x_colname = xonly_colname, family = family,
+      x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname)
     # Update p_vl(m+1)
     p_vl_curr <- update_p_vl_cpp(prob_y_given_xv_s0, Bbasis_s0, p_vl_curr, p_vl_num_init, max_iter, tol)
 
@@ -173,17 +170,14 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
   names(theta_curr)[(ncol(Xmat) + 1):length(theta_curr)] <- paste0("alpha", 1:(length(theta_curr) - ncol(Xmat)))
 
   # -- 4. Standard Error Estimation ----
-  se <- NULL
-  vcov <- NULL
-  se_max_iterations <- NULL
-  se_diagnostics <- NULL
+  se <- NULL; vcov <- NULL
+  se_max_iterations <- NULL; se_diagnostics <- NULL
   if (se_calc) {
     se_results <- estimate_se_smle(
       theta = theta_curr, p_vl = p_vl_curr, p_vl_s1 = p_vl_num_init,
-      yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0,
-      Bbasis_s1 = Bbasis_s1, s1_support_idx = s1_raw_match,
-      x_support, xonly_colname, family, se_max_iter, se_tol,
-      method = se_method, h_n_scale = h_n_scale, hessian_method_args = hessian_method_args,
+      yvec_s1 = yvec_s1, yvec_s0 = yvec_s0, Xmat_s1 = Xmat_s1, Xmat_s0 = Xmat_s0, Bbasis_s0 = Bbasis_s0, Bbasis_s1 = Bbasis_s1,
+      s1_support_idx = s1_raw_match, x_support = x_support, x_colname = xonly_colname, family = family,
+      method = se_method, h_n_scale = h_n_scale, hessian_method_args = hessian_method_args, max_iter = se_max_iter, tol = se_tol,
       verbose = verbose, x_inter_colname = xinterz_colname, z_inter_colname = xinterz_z_colname
     )
     se <- se_results$se
@@ -193,7 +187,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
     names(se) <- rownames(vcov) <- colnames(vcov) <- names(theta_curr)
   }
 
-  return(list(est = theta_curr, se = se, vcov = vcov, p_vl = p_vl_curr,
+  return(list(est = theta_curr, se = se, vcov = vcov,
               iterations = iter, se_max_iterations = se_max_iterations,
-              se_diagnostics = se_diagnostics))
+              p_vl = p_vl_curr, se_diagnostics = se_diagnostics))
 }
