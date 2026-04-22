@@ -31,7 +31,7 @@ orm_smle2(
 
 \item{x_name}{Name of the expensive covariate X.}
 
-\item{family}{Character value specifying the distribution family, which is one of the following: "logit", "probit"}
+\item{family}{Character value specifying the distribution family, which is one of the following: "logistic", "probit"}
 
 \item{theta_init}{Optional initial vector for theta (beta, cutpoints). Useful for warm-starting from a previously fitted model to reduce EM iterations.}
 
@@ -45,7 +45,7 @@ orm_smle2(
 
 \item{se_max_iter}{Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.}
 
-\item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-8.}
+\item{se_tol}{Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-6.}
 
 \item{p_vl_init}{Optional initial matrix of sieve coefficients \eqn{p_{vl}} (dimensions \eqn{d \times s_n}). Useful for warm-starting from a previously fitted model. Must match the current data's \eqn{(d, s_n)}.}
 
