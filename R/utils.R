@@ -772,19 +772,19 @@ alpha_weighted_grad <- function(alpha, beta, y1vec, Xmat, w_iv) {
 # called by em_conditional()
 estimate_se_em_cond <- function(theta2, y2vec, Xmat_m2, theta_cond, vcov_cond, y1vec, Xmat_m1, mu1, pcovs_m1, alpha_ext) {
   pcovs_m2 <- ncol(Xmat_m2)
-  hess <- numDeriv::hessian(
-    func = function(t) {
-      m2_ll(theta = t, y2vec, y1vec, Xmat_m2, mu1, alpha_ext, pcovs_m2)
+  # Jacobian of the score function w.r.t theta2; negated, this is the observed information matrix
+  J22 <- numDeriv::jacobian(
+    func = function(t2) {
+      m2_score(t2, y2vec, y1vec, Xmat_m2, mu1, alpha_ext, pcovs_m2)
     }, x = theta2)
-  # Estimate the conditional variability
-  V22_inv <- try(solve(-hess), silent = TRUE)
+  V22_inv <- try(solve(-J22), silent = TRUE)
 
   if (inherits(V22_inv, "try-error")) {
-    warning("Hessian inversion failed; standard errors cannot be computed.")
+    warning("Observed information inversion failed; standard errors cannot be computed.")
     return(list(se = rep(NA, length(theta2)), vcov = NULL))
   }
 
-  # Calculate the Jacobian of the score function w.r.t theta1
+  # Jacobian of the score function w.r.t theta1
   V21 <- numDeriv::jacobian(
     func = function(t1) {
       beta_tmp <- t1[1:pcovs_m1]
