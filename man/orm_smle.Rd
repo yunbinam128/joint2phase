@@ -40,9 +40,9 @@ orm_smle(
 
 \item{se_calc}{Logical; whether to compute standard errors. Defaults to TRUE.}
 
-\item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h\_n\_scale \times n^{-1/2}}. \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
+\item{se_method}{Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with a uniform perturbation \eqn{h_n = h\_n\_scale \times n^{-1/2}}. \code{"forwardAdapt"} uses a per-parameter adaptive step \eqn{h_i = h\_n\_scale \times |\theta_i| + \mathrm{eps} \cdot \mathbb{1}\{|\theta_i| < \mathrm{zero.tol}\}} (with \code{eps = 1e-4} and \code{zero.tol = sqrt(.Machine$double.eps/7e-7)}, mirroring the initial step in \code{numDeriv::hessian()}) but without Richardson extrapolation. \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.}
 
-\item{h_n_scale}{Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 0.1.}
+\item{h_n_scale}{Positive multiplier applied to the step size when \code{se_method} is \code{"forward"} or \code{"forwardAdapt"}. For \code{"forward"} it scales the base step \eqn{n^{-1/2}}; for \code{"forwardAdapt"} it scales \eqn{|\theta_i|} per parameter. Defaults to 0.1.}
 
 \item{hessian_method_args}{Named list forwarded as \code{method.args} to \code{numDeriv::hessian}. Defaults to \code{list()} (numDeriv defaults: \code{d = 1e-4, r = 4, v = 2, eps = 1e-4}).}
 

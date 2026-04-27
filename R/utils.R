@@ -279,8 +279,10 @@ weighted_grad <- function(theta, yvec, Xmat, w_iv, family) {
 ## -- SE Estimation ----
 # Estimate SE via profile likelihood
 # called by orm_smle()
-# method = "forward":  manual second-order forward-difference Hessian with h_n = n^(-1/2) * h_n_scale
-# method = "numDeriv": Richardson-extrapolated Hessian via numDeriv::hessian()
+# method = "forward":      manual second-order forward-difference Hessian with h_n = h_n_scale * n^(-1/2) (uniform across parameters)
+# method = "forwardAdapt": manual second-order forward-difference Hessian with per-parameter h_i = h_n_scale * |theta_i| + eps * (|theta_i| < zero.tol),
+#                          mirroring the initial step that numDeriv::hessian() uses (default d = 0.1, eps = 1e-4) but without Richardson extrapolation
+# method = "numDeriv":     Richardson-extrapolated Hessian via numDeriv::hessian()
 estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xmat_s0, Bbasis_s0, Bbasis_s1,
                              s1_support_idx, x_support, x_colname, family,
                              method = "forward", h_n_scale = 0.1, hessian_method_args = list(), max_iter, tol,
@@ -304,12 +306,21 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
     hess <- numDeriv::hessian(pll_func, theta, method.args = hessian_method_args)
     hn <- NA_real_
   } else {
-    # Manual second-order forward-difference Hessian:
-    #   H[i,j] = (f(x+h*ei+h*ej) - f(x+h*ei) - f(x+h*ej) + f(x)) / h^2, h = h_n_scale * n^(-1/2)
     nparams <- length(theta)
     n <- length(yvec_s1) + length(yvec_s0)
-    hn <- h_n_scale * n^(-1/2)
-    e_mat <- diag(hn, nparams)
+    if (method == "forwardAdapt") {
+      # Per-parameter adaptive step matching numDeriv::hessian()'s initial step
+      # (defaults d = 0.1, eps = 1e-4, zero.tol = sqrt(.Machine$double.eps/7e-7))
+      zero_tol <- sqrt(.Machine$double.eps / 7e-7)
+      eps_h <- 1e-4
+      h_vec <- abs(h_n_scale * theta) + eps_h * (abs(theta) < zero_tol)
+      hn <- h_vec
+    } else {
+      # Uniform step h_n = h_n_scale * n^(-1/2)
+      h_vec <- rep(h_n_scale * n^(-1/2), nparams)
+      hn <- h_vec[1]
+    }
+    e_mat <- diag(h_vec, nparams)
 
     pl_0d <- pll_func(theta)
     pl_1d <- numeric(nparams)
@@ -323,10 +334,11 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
       }
     }
 
+    # H[i,j] = (f(x+h_i e_i + h_j e_j) - f(x+h_i e_i) - f(x+h_j e_j) + f(x)) / (h_i * h_j)
     hess <- matrix(NA, nparams, nparams)
     for (i in seq_len(nparams)) {
       for (j in i:nparams) {
-        hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (hn^2)
+        hess[i, j] <- hess[j, i] <- (pl_2d[i, j] - pl_1d[i] - pl_1d[j] + pl_0d) / (h_vec[i] * h_vec[j])
       }
     }
   }
@@ -339,6 +351,9 @@ estimate_se_smle <- function(theta, p_vl, p_vl_s1, yvec_s1, yvec_s0, Xmat_s1, Xm
     if (method == "numDeriv") {
       cat(sprintf("  theta perturb |h|:   min=%.2e  med=%.2e  max=%.2e\n",
                   min(theta_perturb), stats::median(theta_perturb), max(theta_perturb)))
+    } else if (method == "forwardAdapt") {
+      cat(sprintf("  theta perturb h_i:   min=%.2e  med=%.2e  max=%.2e (per-parameter)\n",
+                  min(hn), stats::median(hn), max(hn)))
     } else {
       cat(sprintf("  theta perturb h_n=%.2e\n", hn))
     }
@@ -798,28 +813,6 @@ estimate_se_em_cond <- function(theta2, y2vec, Xmat_m2, theta_cond, vcov_cond, y
   vcov <- V22_inv + (V22_inv %*% V21 %*% vcov_cond %*% t(V21) %*% V22_inv)
 
   return(list(se = sqrt(diag(vcov)), vcov = vcov))
-}
-
-m2_ll <- function(theta2, y2vec, y1vec, Xmat_m2, mu1, alpha_ext, pcovs_m2) {
-  # Parameter mapping
-  gamma <- theta2[1:pcovs_m2]
-  sigma12 <- theta2[pcovs_m2 + 1]
-  sigma22 <- theta2[pcovs_m2 + 2]
-
-  mu2 <- as.vector(Xmat_m2 %*% gamma)
-  # [Y1* | Y2, X, Z] ~ N(mu_cond, sd_cond)
-  mu_cond <- mu1 + (sigma12 / sigma22) * (y2vec - mu2)
-  sd_cond <- sqrt(1 - (sigma12^2 / sigma22))
-  # Calculate P(Y1 | Y2, X, Z) from [Y1* | Y2, X, Z] ~ N(mu_cond, sd_cond)
-  a <- alpha_ext[y1vec]; b <- alpha_ext[y1vec + 1]
-  prob_y1_given_y2 <- pmax(1e-16, stats::pnorm(b, mean = mu_cond, sd = sd_cond) -
-                             stats::pnorm(a, mean = mu_cond, sd = sd_cond))
-
-  # Y2 ~ N(mu2, sigma22)
-  prob_y2 <- pmax(1e-16, stats::dnorm(y2vec, mean = mu2, sd = sqrt(sigma22)))
-
-  # log[P(Y1, Y2)] = log[P(Y1 | Y2) * P(Y2)]
-  return(sum(log(prob_y1_given_y2) + log(prob_y2)))
 }
 
 m2_score <- function(theta2, y2vec, y1vec, Xmat_m2, mu1, alpha_ext, pcovs_m2) {

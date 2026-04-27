@@ -8,8 +8,8 @@
 #' @param max_iter Maximum number of EM iterations. Defaults to 1000.
 #' @param tol Convergence tolerance for the optimizer. Defaults to 1e-6.
 #' @param se_calc Logical; whether to compute standard errors. Defaults to TRUE.
-#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with perturbation \eqn{h_n = h\_n\_scale \times n^{-1/2}}. \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
-#' @param h_n_scale Positive multiplier applied to the base step \eqn{n^{-1/2}} when \code{se_method = "forward"}. Defaults to 0.1.
+#' @param se_method Character; SE estimation method. \code{"forward"} (default) uses a manual second-order forward-difference Hessian with a uniform perturbation \eqn{h_n = h\_n\_scale \times n^{-1/2}}. \code{"forwardAdapt"} uses a per-parameter adaptive step \eqn{h_i = h\_n\_scale \times |\theta_i| + \mathrm{eps} \cdot \mathbb{1}\{|\theta_i| < \mathrm{zero.tol}\}} (with \code{eps = 1e-4} and \code{zero.tol = sqrt(.Machine$double.eps/7e-7)}, mirroring the initial step in \code{numDeriv::hessian()}) but without Richardson extrapolation. \code{"numDeriv"} uses Richardson extrapolation via \code{numDeriv::hessian()}.
+#' @param h_n_scale Positive multiplier applied to the step size when \code{se_method} is \code{"forward"} or \code{"forwardAdapt"}. For \code{"forward"} it scales the base step \eqn{n^{-1/2}}; for \code{"forwardAdapt"} it scales \eqn{|\theta_i|} per parameter. Defaults to 0.1.
 #' @param hessian_method_args Named list forwarded as \code{method.args} to \code{numDeriv::hessian}. Defaults to \code{list()} (numDeriv defaults: \code{d = 1e-4, r = 4, v = 2, eps = 1e-4}).
 #' @param se_max_iter Maximum number of EM iterations for finding optimal p_vl in SE estimation. Defaults to 1000.
 #' @param se_tol Convergence tolerance for the optimizer in SE estimation. Defaults to 1e-6.
@@ -41,7 +41,7 @@ orm_smle <- function(formula, data, Bbasis, x_name, family = "probit", max_iter 
                paste(missing_cols, collapse = ", "),
                "- Only the column specified in 'x_name' can have missingness."))
   }
-  se_method <- match.arg(se_method, c("forward", "numDeriv"))
+  se_method <- match.arg(se_method, c("forward", "forwardAdapt", "numDeriv"))
   if (!is.numeric(h_n_scale) || length(h_n_scale) != 1 || !is.finite(h_n_scale) || h_n_scale <= 0) {
     stop("'h_n_scale' must be a single positive finite number.")
   }
